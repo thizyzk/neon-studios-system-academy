@@ -3778,6 +3778,676 @@ pre code {
   }
 }
 
+/* Jornada, trilhas, laboratório e tutor */
+.continue-panel {
+  display: grid;
+  grid-template-columns: 48px minmax(220px, 1fr) minmax(120px, 280px) auto;
+  gap: 16px;
+  align-items: center;
+  margin: 22px 0;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--teal) 45%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--teal-soft) 44%, var(--surface));
+}
+
+.continue-icon,
+.track-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 7px;
+  background: var(--teal-soft);
+  color: var(--teal);
+}
+
+.continue-panel > div:nth-child(2) {
+  display: grid;
+  gap: 2px;
+}
+
+.continue-panel span,
+.sync-banner span,
+.journey-stats span,
+.track-progress span,
+.lab-toolbar label,
+.lab-toolbar > span,
+.tutor-shell aside > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.continue-panel strong {
+  font-size: 18px;
+}
+
+.continue-panel p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.continue-progress,
+.track-progress i {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--surface-soft);
+}
+
+.continue-progress i,
+.track-progress i b {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--teal), var(--xp-green-bright));
+}
+
+.sync-banner {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 13px 15px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--teal);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.sync-banner > svg {
+  width: 22px;
+  color: var(--teal);
+}
+
+.sync-banner > div {
+  display: grid;
+}
+
+.sync-error,
+.sync-offline {
+  border-left-color: var(--gold);
+}
+
+.journey-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 28px;
+}
+
+.journey-stats article {
+  display: grid;
+  gap: 6px;
+  min-height: 112px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+}
+
+.journey-stats strong {
+  font-size: 26px;
+  line-height: 1.1;
+}
+
+.journey-stats small {
+  color: var(--muted);
+}
+
+.journey-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.journey-list button {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 20px;
+  gap: 12px;
+  align-items: center;
+  min-height: 76px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.journey-list button:hover {
+  border-color: var(--teal);
+  transform: translateY(-2px);
+}
+
+.journey-list button > svg:first-child {
+  color: var(--teal);
+}
+
+.journey-list button span {
+  display: grid;
+}
+
+.journey-list small {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty-state {
+  grid-column: 1 / -1;
+  padding: 22px;
+  border: 1px dashed var(--line-strong);
+  color: var(--muted);
+  text-align: center;
+}
+
+.track-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.track-card {
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.track-card > header,
+.track-progress > div {
+  display: flex;
+  justify-content: space-between;
+}
+
+.track-card h2 {
+  margin: 16px 0 6px;
+  font-size: 20px;
+}
+
+.track-card > p {
+  min-height: 48px;
+  margin: 0 0 16px;
+  color: var(--muted);
+}
+
+.track-progress {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+}
+
+.track-progress i {
+  grid-column: 1 / -1;
+}
+
+.track-card ol {
+  display: grid;
+  gap: 4px;
+  margin: 16px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.track-card li button {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.track-card li button:hover {
+  background: var(--surface-soft);
+}
+
+.track-card li.done button {
+  color: var(--green);
+}
+
+.track-card > .button {
+  align-self: flex-start;
+  margin-top: auto;
+}
+
+.detail-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.favorite-button.active {
+  border-color: var(--gold);
+  background: var(--gold-soft);
+  color: var(--gold);
+}
+
+.favorite-button.active svg {
+  fill: currentColor;
+}
+
+.system-notes textarea,
+.luau-editor {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  outline: none;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.system-notes textarea {
+  min-height: 150px;
+  padding: 14px;
+  font: inherit;
+}
+
+.system-notes textarea:focus,
+.luau-editor:focus {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--teal) 14%, transparent);
+}
+
+.knowledge-check fieldset {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.knowledge-check legend {
+  margin-bottom: 12px;
+}
+
+.quiz-choice {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.quiz-choice span {
+  display: grid;
+  gap: 4px;
+}
+
+.quiz-choice small {
+  color: var(--muted);
+}
+
+.quiz-choice.correct {
+  border-color: var(--green);
+  background: var(--green-soft);
+}
+
+.quiz-choice.incorrect {
+  border-color: var(--coral);
+  background: var(--coral-soft);
+}
+
+.lab-workbench {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.lab-toolbar,
+.lab-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 14px;
+  background: var(--surface-soft);
+}
+
+.lab-toolbar select {
+  min-width: 220px;
+  padding: 8px 34px 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.lab-toolbar > span {
+  margin-left: auto;
+}
+
+.lab-challenge {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-block: 1px solid var(--line);
+}
+
+.lab-challenge > div {
+  display: grid;
+  gap: 3px;
+  min-height: 76px;
+  padding: 13px;
+}
+
+.lab-challenge > div + div {
+  border-left: 1px solid var(--line);
+}
+
+.lab-challenge span {
+  color: var(--teal);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.luau-editor {
+  display: block;
+  min-height: 480px;
+  padding: 18px;
+  border: 0;
+  border-radius: 0;
+  background: var(--code-bg);
+  color: var(--code-ink);
+  font: 14px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace;
+  tab-size: 4;
+}
+
+.lab-feedback {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.tutor-shell {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  min-height: 620px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.tutor-shell > aside {
+  padding: 20px;
+  border-right: 1px solid var(--line);
+  background: var(--surface-soft);
+}
+
+.tutor-shell aside strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 20px;
+}
+
+.tutor-shell aside p,
+.tutor-chat > small {
+  color: var(--muted);
+}
+
+.tutor-suggestions {
+  display: grid;
+  gap: 7px;
+  margin-top: 22px;
+}
+
+.tutor-suggestions button {
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tutor-chat {
+  display: grid;
+  grid-template-rows: 1fr auto auto;
+  min-width: 0;
+  padding: 18px;
+}
+
+.tutor-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+  max-height: 480px;
+  padding-right: 5px;
+}
+
+.tutor-messages article {
+  position: relative;
+  align-self: flex-start;
+  max-width: 82%;
+  padding: 11px 42px 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-soft);
+}
+
+.tutor-messages article.user {
+  align-self: flex-end;
+  padding-right: 13px;
+  border-color: color-mix(in srgb, var(--teal) 45%, var(--line));
+  background: var(--teal-soft);
+}
+
+.tutor-messages article > span {
+  color: var(--teal);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.tutor-messages p {
+  margin: 4px 0 0;
+}
+
+.tutor-messages .icon-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
+.tutor-form {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.tutor-form input {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.tutor-chat > small {
+  margin-top: 8px;
+}
+
+@media (max-width: 980px) {
+  .continue-panel {
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+  }
+
+  .continue-progress {
+    grid-column: 2 / -1;
+    grid-row: 2;
+  }
+
+  .journey-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .track-grid,
+  .tutor-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .tutor-shell > aside {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .tutor-suggestions {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .continue-panel {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .continue-panel .button,
+  .continue-progress {
+    grid-column: 1 / -1;
+  }
+
+  .journey-stats,
+  .journey-list,
+  .track-grid,
+  .lab-challenge {
+    grid-template-columns: 1fr;
+  }
+
+  .lab-challenge > div + div {
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
+  .lab-toolbar,
+  .lab-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .lab-toolbar select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .lab-toolbar > span {
+    margin-left: 0;
+  }
+
+  .lab-feedback {
+    margin-right: 0;
+  }
+
+  .tutor-suggestions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tutor-form {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .tutor-form .button {
+    grid-column: 1 / -1;
+  }
+
+  .tutor-messages article {
+    max-width: 94%;
+  }
+
+  .detail-actions {
+    justify-content: space-between;
+  }
+}
+
+.admin-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.admin-grid article {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+}
+
+.admin-grid span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.admin-grid strong {
+  display: block;
+  overflow-wrap: anywhere;
+  margin-top: 7px;
+  font-size: 18px;
+}
+
+.admin-grid p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.access-denied {
+  display: grid;
+  justify-items: center;
+  max-width: 560px;
+  margin: 10vh auto;
+  padding: 36px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  text-align: center;
+}
+
+.access-denied > svg {
+  width: 42px;
+  height: 42px;
+  color: var(--coral);
+}
+
+@media (max-width: 680px) {
+  .admin-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-actions .button {
+    width: 100%;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

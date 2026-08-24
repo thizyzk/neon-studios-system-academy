@@ -22,6 +22,7 @@ function normalizeUser(user) {
     givenName: String(user.givenName ?? ""),
     picture: String(user.picture ?? ""),
     hostedDomain: String(user.hostedDomain ?? ""),
+    isAdmin: user.isAdmin === true,
   };
 }
 

@@ -6,6 +6,8 @@
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#146b68">
   <meta name="description" content="Academia prática de sistemas Roblox, Luau, arquitetura, IA, dados e produção de jogos.">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="assets/academy-icon.svg" type="image/svg+xml">
   <title>Neon Studios System Academy</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -37,6 +39,18 @@
         <button class="nav-item active" type="button" data-route="overview">
           <i data-lucide="layout-dashboard"></i><span>Visão geral</span>
         </button>
+        <button class="nav-item" type="button" data-route="journey">
+          <i data-lucide="compass"></i><span>Minha Jornada</span>
+        </button>
+        <button class="nav-item" type="button" data-route="tracks">
+          <i data-lucide="milestone"></i><span>Trilhas</span>
+        </button>
+        <button class="nav-item" type="button" data-route="lab">
+          <i data-lucide="square-terminal"></i><span>Laboratório Luau</span>
+        </button>
+        <button class="nav-item" type="button" data-route="tutor">
+          <i data-lucide="messages-square"></i><span>Tutor</span>
+        </button>
         <button class="nav-item" type="button" data-route="roadmap">
           <i data-lucide="route"></i><span>Ordem de construção</span>
         </button>
@@ -60,6 +74,9 @@
         </button>
         <button class="nav-item" type="button" data-route="solo-dev">
           <i data-lucide="flame-kindling"></i><span>O que ninguém fala</span>
+        </button>
+        <button class="nav-item" id="admin-nav" type="button" data-route="admin" hidden>
+          <i data-lucide="shield-ellipsis"></i><span>Administração</span>
         </button>
       </nav>
 
@@ -106,6 +123,9 @@
         <button class="icon-button" id="print-button" type="button" aria-label="Imprimir guia" title="Imprimir guia">
           <i data-lucide="printer"></i>
         </button>
+        <button class="icon-button" id="install-button" type="button" aria-label="Instalar Academy" title="Instalar Academy" hidden>
+          <i data-lucide="monitor-down"></i>
+        </button>
         <button class="icon-button" id="theme-button" type="button" aria-label="Alternar tema" title="Alternar tema">
           <i data-lucide="moon"></i>
         </button>
@@ -116,10 +136,12 @@
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <input id="profile-import" type="file" accept="application/json" hidden>
 
   <script src="assets/lucide.min.js"></script>
   <script src="integration-systems.js"></script>
   <script src="learning-library.js"></script>
+  <script src="academy-data.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

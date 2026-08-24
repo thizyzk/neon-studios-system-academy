@@ -7,6 +7,7 @@ import { URL } from "node:url";
 import { OAuth2Client } from "google-auth-library";
 
 import { readConfig } from "./config.js";
+import { createLearningStore } from "./learningStore.js";
 import { createSignedSession, verifySignedSession } from "./signedSession.js";
 import { exchangeAuthorizationCode, getUserInfo, listVideos, queryVideos, refreshAccessToken } from "./tiktokClient.js";
 import { readTokenStore, withTokenTimestamps, writeTokenStore } from "./tokenStore.js";
@@ -15,15 +16,18 @@ const config = readConfig();
 const STATE_MAX_AGE_SECONDS = 10 * 60;
 const TOKEN_REFRESH_SKEW_MS = 10 * 60 * 1000;
 const MAX_AUTH_BODY_BYTES = 20 * 1024;
+const MAX_LEARNING_PROFILE_BODY_BYTES = 600 * 1024;
 const authRateLimitWindowMs = config.authRateLimitWindowSeconds * 1000;
 const googleClient = config.googleClientId ? new OAuth2Client(config.googleClientId) : null;
 const authAttempts = new Map();
+const learningStore = createLearningStore(config.databaseUrl);
 
 const contentTypes = new Map([
   [".css", "text/css; charset=utf-8"],
   [".html", "text/html; charset=utf-8"],
   [".js", "text/javascript; charset=utf-8"],
   [".json", "application/json; charset=utf-8"],
+  [".webmanifest", "application/manifest+json; charset=utf-8"],
   [".luau", "text/plain; charset=utf-8"],
   [".png", "image/png"],
   [".jpg", "image/jpeg"],
@@ -56,7 +60,7 @@ function applySecurityHeaders(response) {
   response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   response.setHeader("X-Content-Type-Options", "nosniff");
   response.setHeader("X-Frame-Options", "DENY");
-  response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  response.setHeader("Permissions-Policy", "camera=(), microphone=(self), geolocation=()");
 }
 
 function isAuthConfigured() {
@@ -174,7 +178,7 @@ function consumeAuthAttempt(request) {
   return { allowed: true, ip, retryAfterSeconds: 0 };
 }
 
-async function readJsonBody(request) {
+async function readJsonBody(request, maximumBytes = MAX_AUTH_BODY_BYTES) {
   if (!(request.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
     const error = new Error("Content-Type must be application/json.");
     error.statusCode = 415;
@@ -185,7 +189,7 @@ async function readJsonBody(request) {
   let receivedBytes = 0;
   for await (const chunk of request) {
     receivedBytes += chunk.length;
-    if (receivedBytes > MAX_AUTH_BODY_BYTES) {
+    if (receivedBytes > maximumBytes) {
       const error = new Error("Request body is too large.");
       error.statusCode = 413;
       throw error;
@@ -286,6 +290,7 @@ async function verifyGoogleCredential(credential) {
     givenName: payload.given_name ?? "",
     picture: payload.picture ?? "",
     hostedDomain: payload.hd ?? "",
+    isAdmin: config.adminEmails.includes(email),
   };
 }
 
@@ -703,6 +708,56 @@ async function handleAuthLogout(request, response) {
   sendJson(response, 200, { ok: true });
 }
 
+async function requireAuthSession(request, response) {
+  const session = await getAuthSession(request);
+  if (!session) {
+    sendJson(response, 401, { ok: false, error: "Unauthorized" });
+    return null;
+  }
+  return session;
+}
+
+async function handleLearningProfileRead(request, response) {
+  const session = await requireAuthSession(request, response);
+  if (!session) return;
+
+  if (!learningStore.available) {
+    sendJson(response, 200, { ok: true, syncAvailable: false, profile: null });
+    return;
+  }
+
+  const stored = await learningStore.read(session.user);
+  sendJson(response, 200, {
+    ok: true,
+    syncAvailable: true,
+    profile: stored?.profile ?? null,
+    revision: stored?.revision ?? 0,
+    updatedAt: stored?.updatedAt ?? null,
+  });
+}
+
+async function handleLearningProfileWrite(request, response) {
+  const session = await requireAuthSession(request, response);
+  if (!session) return;
+  if (!isTrustedRequestOrigin(request)) {
+    sendJson(response, 403, { ok: false, error: "InvalidOrigin" });
+    return;
+  }
+  if (!learningStore.available) {
+    sendJson(response, 503, { ok: false, error: "LearningSyncUnavailable", syncAvailable: false });
+    return;
+  }
+
+  const body = await readJsonBody(request, MAX_LEARNING_PROFILE_BODY_BYTES);
+  const stored = await learningStore.write(session.user, body.profile);
+  sendJson(response, 200, {
+    ok: true,
+    syncAvailable: true,
+    revision: stored.revision,
+    updatedAt: stored.updatedAt,
+  });
+}
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -720,6 +775,7 @@ async function route(request, response) {
       ok: true,
       service: "neon-studios-system-academy",
       authConfigured: isAuthConfigured(),
+      learningSyncConfigured: learningStore.available,
     });
     return;
   }
@@ -741,6 +797,16 @@ async function route(request, response) {
 
   if (request.method === "POST" && requestUrl.pathname === "/api/auth/logout") {
     await handleAuthLogout(request, response);
+    return;
+  }
+
+  if (request.method === "GET" && requestUrl.pathname === "/api/learning/profile") {
+    await handleLearningProfileRead(request, response);
+    return;
+  }
+
+  if (request.method === "PUT" && requestUrl.pathname === "/api/learning/profile") {
+    await handleLearningProfileWrite(request, response);
     return;
   }
 

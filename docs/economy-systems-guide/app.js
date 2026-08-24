@@ -4,6 +4,9 @@
   const STORAGE_KEY = "neon-academy-progress-v1";
   const THEME_KEY = "neon-academy-theme";
   const WORKSPACE_KEY = "neon-academy-workspace-v1";
+  const ACTIVE_ACCOUNT_KEY = "neon-academy-active-account";
+  const learningTracks = window.NEON_ACADEMY_TRACKS || [];
+  let activeAccountId = localStorage.getItem(ACTIVE_ACCOUNT_KEY) || "guest";
 
   [
     ["cotton-economy-guide-progress-v1", STORAGE_KEY],
@@ -2725,6 +2728,11 @@ local scenarios = {
   let scrollAnimationFrame = null;
   let pointerAnimationFrame = null;
   let latestPointerEvent = null;
+  let syncTimer = null;
+  let syncStatus = "local";
+  let deferredInstallPrompt = null;
+  let labFeedback = "";
+  let currentUser = null;
 
   const content = document.getElementById("content");
   const sidebar = document.getElementById("sidebar");
@@ -2737,19 +2745,39 @@ local scenarios = {
 
   function loadProgress() {
     try {
-      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
+      const accountKey = `${STORAGE_KEY}:${activeAccountId}`;
+      const legacyValue = localStorage.getItem(STORAGE_KEY);
+      if (activeAccountId !== "guest" && localStorage.getItem(accountKey) === null && legacyValue !== null) {
+        localStorage.setItem(accountKey, legacyValue);
+        localStorage.removeItem(STORAGE_KEY);
+      }
+      const stored = JSON.parse(localStorage.getItem(accountKey) || legacyValue);
       return {
         systems: stored?.systems && typeof stored.systems === "object" ? stored.systems : {},
-        steps: stored?.steps && typeof stored.steps === "object" ? stored.steps : {}
+        steps: stored?.steps && typeof stored.steps === "object" ? stored.steps : {},
+        favorites: stored?.favorites && typeof stored.favorites === "object" ? stored.favorites : {},
+        systemNotes: stored?.systemNotes && typeof stored.systemNotes === "object" ? stored.systemNotes : {},
+        quizAnswers: stored?.quizAnswers && typeof stored.quizAnswers === "object" ? stored.quizAnswers : {},
+        labDrafts: stored?.labDrafts && typeof stored.labDrafts === "object" ? stored.labDrafts : {},
+        tutorMessages: Array.isArray(stored?.tutorMessages) ? stored.tutorMessages.slice(-20) : [],
+        recents: Array.isArray(stored?.recents) ? stored.recents.slice(0, 8) : [],
+        lastRoute: typeof stored?.lastRoute === "string" ? stored.lastRoute : "",
+        updatedAt: Number.isFinite(stored?.updatedAt) ? stored.updatedAt : 0
       };
     } catch (_error) {
-      return { systems: {}, steps: {} };
+      return { systems: {}, steps: {}, favorites: {}, systemNotes: {}, quizAnswers: {}, labDrafts: {}, tutorMessages: [], recents: [], lastRoute: "", updatedAt: 0 };
     }
   }
 
-  function saveProgress() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+  function persistProgressLocally() {
+    localStorage.setItem(`${STORAGE_KEY}:${activeAccountId}`, JSON.stringify(progress));
+  }
+
+  function saveProgress(shouldSync = true) {
+    if (shouldSync) progress.updatedAt = Date.now();
+    persistProgressLocally();
     updateProgressUI();
+    if (shouldSync) scheduleCloudSync();
   }
 
   function createDefaultWorkState() {
@@ -2787,7 +2815,13 @@ local scenarios = {
   function loadWorkState() {
     const defaults = createDefaultWorkState();
     try {
-      const stored = JSON.parse(localStorage.getItem(WORKSPACE_KEY));
+      const accountKey = `${WORKSPACE_KEY}:${activeAccountId}`;
+      const legacyValue = localStorage.getItem(WORKSPACE_KEY);
+      if (activeAccountId !== "guest" && localStorage.getItem(accountKey) === null && legacyValue !== null) {
+        localStorage.setItem(accountKey, legacyValue);
+        localStorage.removeItem(WORKSPACE_KEY);
+      }
+      const stored = JSON.parse(localStorage.getItem(accountKey) || legacyValue);
       if (!stored || typeof stored !== "object") return defaults;
       const storedProject = stored.project && typeof stored.project === "object" ? stored.project : {};
       return {
@@ -2808,8 +2842,70 @@ local scenarios = {
   }
 
   function saveWorkState(shouldRender) {
-    localStorage.setItem(WORKSPACE_KEY, JSON.stringify(workState));
+    localStorage.setItem(`${WORKSPACE_KEY}:${activeAccountId}`, JSON.stringify(workState));
+    progress.updatedAt = Date.now();
+    persistProgressLocally();
+    scheduleCloudSync();
     if (shouldRender) render();
+  }
+
+  function buildLearningProfile() {
+    return { version: 2, progress, workspace: workState };
+  }
+
+  function scheduleCloudSync() {
+    if (window.location.protocol === "file:" || syncStatus === "unavailable") return;
+    clearTimeout(syncTimer);
+    syncStatus = syncStatus === "synced" ? "saving" : syncStatus;
+    syncTimer = setTimeout(pushLearningProfile, 900);
+  }
+
+  async function pushLearningProfile() {
+    try {
+      const response = await fetch("/api/learning/profile", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile: buildLearningProfile() })
+      });
+      if (response.status === 503) {
+        syncStatus = "unavailable";
+        return;
+      }
+      if (!response.ok) throw new Error("Learning profile sync failed.");
+      syncStatus = "synced";
+    } catch (_error) {
+      syncStatus = navigator.onLine ? "error" : "offline";
+    }
+  }
+
+  async function hydrateLearningProfile() {
+    try {
+      const response = await fetch("/api/learning/profile", { credentials: "same-origin", cache: "no-store" });
+      if (!response.ok) return;
+      const payload = await response.json();
+      if (!payload.syncAvailable) {
+        syncStatus = "unavailable";
+        return;
+      }
+      syncStatus = "synced";
+      const remoteUpdatedAt = Number(payload.profile?.progress?.updatedAt) || 0;
+      if (payload.profile && remoteUpdatedAt > progress.updatedAt) {
+        const remoteProgress = payload.profile.progress;
+        localStorage.setItem(`${STORAGE_KEY}:${activeAccountId}`, JSON.stringify(remoteProgress));
+        if (payload.profile.workspace) {
+          localStorage.setItem(`${WORKSPACE_KEY}:${activeAccountId}`, JSON.stringify(payload.profile.workspace));
+        }
+        progress = loadProgress();
+        workState = loadWorkState();
+        renderSystemNav();
+        render();
+      } else if (!payload.profile || progress.updatedAt > remoteUpdatedAt) {
+        scheduleCloudSync();
+      }
+    } catch (_error) {
+      syncStatus = navigator.onLine ? "error" : "offline";
+    }
   }
 
   function createLocalId(prefix) {
@@ -2936,6 +3032,8 @@ local scenarios = {
           <button class="button primary" type="button" data-route="roadmap">${icon("route")} Ver ordem recomendada</button>
         </div>
       </header>
+
+      ${renderContinuePanel()}
 
       <figure class="visual-banner">
         <img src="assets/economy-workshop.png" alt="Fábrica de algodão conectada a banco, leilão, mercado, crafting e descontos">
@@ -3630,10 +3728,7 @@ local scenarios = {
             <span class="risk-badge risk-${system.riskClass}">${system.risk} risco</span>
           </div>
         </div>
-        <label class="completion-control">
-          <input type="checkbox" data-system-complete="${system.id}" ${completed ? "checked" : ""}>
-          <span>Estudado</span>
-        </label>
+        <div class="detail-actions"><button class="icon-button favorite-button ${progress.favorites[system.id] ? "active" : ""}" type="button" data-favorite="${system.id}" aria-label="${progress.favorites[system.id] ? "Remover dos favoritos" : "Adicionar aos favoritos"}" title="${progress.favorites[system.id] ? "Remover dos favoritos" : "Adicionar aos favoritos"}">${icon("star")}</button><label class="completion-control"><input type="checkbox" data-system-complete="${system.id}" ${completed ? "checked" : ""}><span>Estudado</span></label></div>
       </header>
 
       <section class="thinking-callout">
@@ -3752,6 +3847,13 @@ local scenarios = {
         </div>
       </section>
 
+      ${renderKnowledgeCheck(system)}
+
+      <section class="content-section system-notes" id="notes">
+        <div class="section-heading"><div><div class="eyebrow">Caderno pessoal</div><h2>Notas desta aula</h2></div><span>Salvo automaticamente</span></div>
+        <textarea data-system-note="${system.id}" rows="7" placeholder="Registre decisões, dúvidas, adaptações para o seu jogo e pontos que quer revisar...">${escapeHtml(progress.systemNotes[system.id] || "")}</textarea>
+      </section>
+
       ${renderRelatedLearning(system)}
 
       <footer class="detail-footer">
@@ -3761,10 +3863,146 @@ local scenarios = {
     `;
   }
 
+  function renderKnowledgeCheck(system) {
+    const correct = system.methods[0][0];
+    const distractors = systems.filter((candidate) => candidate !== system).slice(0, 2).map((candidate) => candidate.methods[0][0]);
+    const choices = [correct, ...distractors].sort((left, right) => left.localeCompare(right));
+    const selected = progress.quizAnswers[system.id];
+    return `<section class="content-section knowledge-check"><div class="section-heading"><div><div class="eyebrow">Exercício interativo</div><h2>Verificação rápida</h2></div><span>${selected === correct ? "Resposta correta" : "Escolha uma opção"}</span></div><fieldset><legend>Qual método inicia o contrato principal de <strong>${system.label}</strong>?</legend>${choices.map((choice) => `<label class="quiz-choice ${selected === choice ? (choice === correct ? "correct" : "incorrect") : ""}"><input type="radio" name="quiz-${system.id}" value="${escapeHtml(choice)}" data-quiz-system="${system.id}" ${selected === choice ? "checked" : ""}><span><code>${escapeHtml(choice)}</code>${selected === choice ? `<small>${choice === correct ? system.methods[0][1] : "Esse método pertence a outro sistema. Compare responsabilidades."}</small>` : ""}</span></label>`).join("")}</fieldset></section>`;
+  }
+
+  function getRecommendedSystem() {
+    const unfinishedTrackSystem = learningTracks
+      .flatMap((track) => track.systems)
+      .map(getSystem)
+      .find((system) => system && !progress.systems[system.id]);
+    return unfinishedTrackSystem || systems.find((system) => !progress.systems[system.id]) || systems[0];
+  }
+
+  function renderContinuePanel() {
+    const lastSystemId = progress.lastRoute.startsWith("system/") ? progress.lastRoute.split("/")[1] : "";
+    const target = getSystem(lastSystemId) || getRecommendedSystem();
+    if (!target) return "";
+    const completedSteps = target.stages.filter((_stage, index) => progress.steps[`${target.id}:${index}`]).length;
+    const percentage = Math.round((completedSteps / Math.max(target.stages.length, 1)) * 100);
+    return `
+      <section class="continue-panel">
+        <div class="continue-icon">${icon("play")}</div>
+        <div><span>${lastSystemId ? "Continuar de onde parou" : "Próxima aula recomendada"}</span><strong>${target.label}</strong><p>${completedSteps}/${target.stages.length} etapas concluídas</p></div>
+        <div class="continue-progress" aria-label="${percentage}% concluído"><i style="width:${percentage}%"></i></div>
+        <button class="button primary" type="button" data-route="system/${target.id}">Continuar ${icon("arrow-right")}</button>
+      </section>`;
+  }
+
+  function renderJourney() {
+    const completed = systems.filter((system) => progress.systems[system.id]).length;
+    const favorites = systems.filter((system) => progress.favorites[system.id]);
+    const recents = progress.recents.map(getSystem).filter(Boolean);
+    const statusCopy = {
+      synced: ["cloud-check", "Sincronizado com sua conta"],
+      saving: ["refresh-cw", "Salvando alterações"],
+      offline: ["cloud-off", "Offline: alterações guardadas neste dispositivo"],
+      error: ["cloud-alert", "Nuvem indisponível: cópia local preservada"],
+      unavailable: ["hard-drive", "Salvo neste dispositivo"],
+      local: ["hard-drive", "Preparando seu perfil"]
+    }[syncStatus] || ["hard-drive", "Salvo neste dispositivo"];
+
+    content.innerHTML = `
+      <header class="page-header"><div><div class="eyebrow">${icon("compass")} Área do aluno</div><h1>Minha Jornada</h1><p class="lead">Retome o estudo, organize referências e transforme leitura em prática.</p></div></header>
+      <div class="sync-banner sync-${syncStatus}">${icon(statusCopy[0])}<div><strong>${statusCopy[1]}</strong><span>${completed}/${systems.length} sistemas estudados</span></div></div>
+      ${renderContinuePanel()}
+      <section class="journey-stats">
+        <article><span>Conclusão</span><strong>${Math.round((completed / systems.length) * 100)}%</strong><div class="xp-track"><i style="width:${Math.round((completed / systems.length) * 100)}%"></i></div></article>
+        <article><span>Favoritos</span><strong>${favorites.length}</strong><small>Referências rápidas</small></article>
+        <article><span>Notas</span><strong>${Object.values(progress.systemNotes).filter((note) => note.trim()).length}</strong><small>Decisões registradas</small></article>
+        <article><span>XP de prática</span><strong>${getWorkspaceXP().total.toLocaleString("pt-BR")}</strong><small>Nível ${getWorkspaceXP().level}</small></article>
+      </section>
+      <section class="content-section"><div class="section-heading"><div><div class="eyebrow">Acesso rápido</div><h2>Favoritos</h2></div><p>Marque a estrela de qualquer sistema para montar sua biblioteca.</p></div>
+        <div class="journey-list">${favorites.length ? favorites.map((system) => `<button type="button" data-route="system/${system.id}">${icon(system.icon)}<span><strong>${system.label}</strong><small>${system.role}</small></span>${icon("arrow-right")}</button>`).join("") : '<div class="empty-state">Nenhum favorito ainda. Abra um sistema e marque a estrela.</div>'}</div>
+      </section>
+      <section class="content-section"><div class="section-heading"><div><div class="eyebrow">Histórico</div><h2>Vistos recentemente</h2></div></div>
+        <div class="journey-list compact">${recents.length ? recents.map((system) => `<button type="button" data-route="system/${system.id}">${icon("history")}<span><strong>${system.label}</strong><small>Fase ${system.phase} · ${system.tier || system.category}</small></span>${icon("arrow-right")}</button>`).join("") : '<div class="empty-state">Seu histórico aparecerá ao abrir uma aula.</div>'}</div>
+      </section>`;
+  }
+
+  function renderTracks() {
+    content.innerHTML = `
+      <header class="page-header"><div><div class="eyebrow">${icon("milestone")} Currículo guiado</div><h1>Trilhas de aprendizado</h1><p class="lead">Sequências menores, com objetivo e ordem clara, para você não estudar setenta sistemas ao mesmo tempo.</p></div></header>
+      <div class="track-grid">${learningTracks.map((track) => {
+        const trackSystems = track.systems.map(getSystem).filter(Boolean);
+        const done = trackSystems.filter((system) => progress.systems[system.id]).length;
+        const next = trackSystems.find((system) => !progress.systems[system.id]) || trackSystems.at(-1);
+        const percentage = Math.round((done / Math.max(trackSystems.length, 1)) * 100);
+        return `<article class="track-card"><header><span class="track-icon">${icon(track.icon)}</span><span class="tier-badge">${track.level}</span></header><h2>${track.title}</h2><p>${track.description}</p><div class="track-progress"><span>${done}/${trackSystems.length} aulas</span><strong>${percentage}%</strong><i><b style="width:${percentage}%"></b></i></div><ol>${trackSystems.map((system) => `<li class="${progress.systems[system.id] ? "done" : ""}"><button type="button" data-route="system/${system.id}">${progress.systems[system.id] ? icon("circle-check-big") : icon("circle")}<span>${system.label}</span></button></li>`).join("")}</ol>${next ? `<button class="button primary" type="button" data-route="system/${next.id}">${done === trackSystems.length ? "Revisar trilha" : "Continuar trilha"} ${icon("arrow-right")}</button>` : ""}</article>`;
+      }).join("")}</div>`;
+  }
+
+  function createLabStarter(system) {
+    const methodName = system?.methods?.[0]?.[0]?.split("(")[0] || "Execute";
+    return `-- Laboratório: ${system?.name || "Service"}\nlocal ${system?.name || "Service"} = {}\n${system?.name || "Service"}.__index = ${system?.name || "Service"}\n\nfunction ${system?.name || "Service"}:${methodName}(player, payload)\n    -- 1. Valide payload e permissão no servidor\n    -- 2. Calcule antes de alterar o estado\n    -- 3. Retorne um resultado explícito\nend\n\nreturn ${system?.name || "Service"}`;
+  }
+
+  function renderLab(systemId) {
+    const system = getSystem(systemId) || getRecommendedSystem();
+    const draft = progress.labDrafts[system.id] || createLabStarter(system);
+    content.innerHTML = `
+      <header class="page-header"><div><div class="eyebrow">${icon("square-terminal")} Prática orientada</div><h1>Laboratório Luau</h1><p class="lead">Escreva o contrato do módulo, faça uma revisão estrutural e compare suas decisões com a aula.</p></div></header>
+      <section class="lab-workbench">
+        <div class="lab-toolbar"><label for="lab-system">Sistema</label><select id="lab-system" data-lab-system>${systems.map((item) => `<option value="${item.id}" ${item.id === system.id ? "selected" : ""}>${item.label}</option>`).join("")}</select><span>Rascunho salvo automaticamente</span></div>
+        <div class="lab-challenge"><div><span>Básico</span><strong>Declare módulo e método público</strong></div><div><span>Intermediário</span><strong>Valide entrada sem confiar no cliente</strong></div><div><span>Avançado</span><strong>Planeje falha parcial e rollback</strong></div></div>
+        <textarea class="luau-editor" data-lab-draft="${system.id}" spellcheck="false" aria-label="Editor Luau">${escapeHtml(draft)}</textarea>
+        <footer class="lab-actions"><div class="lab-feedback" aria-live="polite">${labFeedback || "A validação procura estrutura, não executa o motor do Roblox."}</div><button class="button" type="button" data-lab-reset="${system.id}">${icon("rotate-ccw")} Reiniciar</button><button class="button" type="button" data-copy-lab="${system.id}">${icon("copy")} Copiar</button><button class="button primary" type="button" data-lab-check="${system.id}">${icon("scan-search")} Revisar estrutura</button></footer>
+      </section>
+      <section class="content-section"><div class="section-heading"><div><div class="eyebrow">Contrato de referência</div><h2>${system.name}</h2></div><button class="text-button" type="button" data-route="system/${system.id}">Abrir aula completa ${icon("arrow-right")}</button></div><div class="principle-grid">${system.invariants.slice(0, 4).map((rule, index) => `<article class="principle-card"><div class="principle-icon">${icon("shield-check")}</div><div><h3>Invariante ${index + 1}</h3><p>${rule}</p></div></article>`).join("")}</div></section>`;
+  }
+
+  function tutorReply(question) {
+    const normalized = question.toLocaleLowerCase("pt-BR");
+    const matched = systems.find((system) => [system.name, system.label, ...system.methods.map((method) => method[0])].some((term) => normalized.includes(term.toLocaleLowerCase("pt-BR"))))
+      || getSystem(progress.lastRoute.split("/")[1])
+      || getRecommendedSystem();
+    if (!matched) return "Abra uma aula para eu usar o contexto técnico dela.";
+    if (/erro|risco|falha|segur/.test(normalized)) return `${matched.label}: ${matched.mistakes[0][0]}. ${matched.mistakes[0][1]} Invariante principal: ${matched.invariants[0]}`;
+    if (/m[eé]todo|api|fun[cç][aã]o|c[oó]digo/.test(normalized)) return `Comece por ${matched.methods[0][0]}: ${matched.methods[0][1]} O retorno esperado é ${matched.methods[0][2]}. Depois teste: ${matched.tests[0]}`;
+    if (/ordem|etapa|come[cç]ar|implementar/.test(normalized)) return `Para ${matched.label}, siga esta ordem: ${matched.stages.slice(0, 4).join(" Depois, ")}`;
+    return `${matched.label} existe para ${matched.role.toLocaleLowerCase("pt-BR")} Pense primeiro nesta pergunta: ${matched.question}`;
+  }
+
+  function renderTutor() {
+    const context = getSystem(progress.lastRoute.split("/")[1]) || getRecommendedSystem();
+    const messages = Array.isArray(progress.tutorMessages) ? progress.tutorMessages.slice(-8) : [];
+    content.innerHTML = `
+      <header class="page-header"><div><div class="eyebrow">${icon("messages-square")} Tutor contextual</div><h1>Converse com a Academy</h1><p class="lead">Pergunte sobre arquitetura, métodos, etapas e riscos usando o conteúdo técnico desta biblioteca.</p></div></header>
+      <section class="tutor-shell"><aside><span>Contexto atual</span><strong>${context?.label || "Visão geral"}</strong><p>${context?.role || "Escolha uma aula para aprofundar a conversa."}</p><div class="tutor-suggestions">${["Como começar?", "Qual o maior risco?", "Explique a API", "Como testar?"].map((text) => `<button type="button" data-tutor-suggestion="${text}">${text}</button>`).join("")}</div></aside><div class="tutor-chat"><div class="tutor-messages" aria-live="polite">${messages.length ? messages.map((message) => `<article class="${message.role}"><span>${message.role === "user" ? "Você" : "Tutor"}</span><p>${escapeHtml(message.text)}</p>${message.role === "assistant" ? `<button class="icon-button" type="button" data-speak="${escapeHtml(message.text)}" aria-label="Ouvir resposta" title="Ouvir resposta">${icon("volume-2")}</button>` : ""}</article>`).join("") : `<article class="assistant"><span>Tutor</span><p>Estou usando ${context?.label || "a biblioteca"} como contexto. O que você quer entender primeiro?</p></article>`}</div><form class="tutor-form" data-tutor-form><button class="icon-button" type="button" data-voice-input aria-label="Perguntar por voz" title="Perguntar por voz">${icon("mic")}</button><label class="sr-only" for="tutor-question">Pergunta</label><input id="tutor-question" name="question" placeholder="Pergunte como pensar, implementar ou testar..." autocomplete="off" required><button class="button primary" type="submit">Enviar ${icon("send")}</button></form><small>Este tutor consulta o conteúdo local da Academy. Ele não envia seu código para um serviço externo.</small></div></section>`;
+  }
+
+  function renderAdmin() {
+    if (!currentUser?.isAdmin) {
+      content.innerHTML = `<section class="access-denied">${icon("shield-x")}<h1>Acesso administrativo restrito</h1><p>Esta conta não aparece em <code>ADMIN_EMAILS</code>.</p><button class="button" type="button" data-route="overview">Voltar</button></section>`;
+      return;
+    }
+    const completed = systems.filter((system) => progress.systems[system.id]).length;
+    content.innerHTML = `
+      <header class="page-header"><div><div class="eyebrow">${icon("shield-ellipsis")} Operação da Academy</div><h1>Administração</h1><p class="lead">Audite catálogo, persistência, publicação e os dados da sua própria conta.</p></div></header>
+      <section class="admin-grid"><article><span>Conteúdo</span><strong>${systems.length} sistemas</strong><p>${systems.reduce((total, system) => total + system.methods.length, 0)} métodos documentados</p></article><article><span>Conta administrativa</span><strong>${escapeHtml(currentUser.email)}</strong><p>Sessão assinada e protegida</p></article><article><span>Persistência</span><strong>${syncStatus === "synced" ? "PostgreSQL ativo" : "Armazenamento local"}</strong><p>${completed} aulas concluídas nesta conta</p></article></section>
+      <section class="content-section"><div class="section-heading"><div><div class="eyebrow">Portabilidade</div><h2>Backup do perfil</h2></div><p>O arquivo inclui progresso, favoritos, notas, laboratório e workspace.</p></div><div class="admin-actions"><button class="button primary" type="button" data-export-profile>${icon("download")} Exportar backup</button><button class="button" type="button" data-import-profile>${icon("upload")} Importar backup</button><button class="button" type="button" data-sync-now>${icon("cloud-upload")} Sincronizar agora</button></div></section>
+      <section class="content-section"><div class="section-heading"><div><div class="eyebrow">Publicação</div><h2>Checklist operacional</h2></div></div><div class="check-list">${["Login Google e logout testados no domínio público.", "reCAPTCHA valida hostname e ação login.", "Políticas de privacidade e termos usam dados reais de contato.", "DATABASE_URL possui retenção e backup adequados.", "Manifesto, service worker e modo offline foram revisados.", "Conteúdo alterado possui changelog e revisão mobile."].map((item) => `<label class="check-item"><input type="checkbox"><span>${item}</span></label>`).join("")}</div></section>`;
+  }
+
   function render() {
     const route = currentRoute();
     if (route === "overview") {
       renderOverview();
+    } else if (route === "journey") {
+      renderJourney();
+    } else if (route === "tracks") {
+      renderTracks();
+    } else if (route === "lab" || route.startsWith("lab/")) {
+      renderLab(route.split("/")[1]);
+    } else if (route === "tutor") {
+      renderTutor();
+    } else if (route === "admin") {
+      renderAdmin();
     } else if (route === "roadmap") {
       renderRoadmap();
     } else if (route === "methods" || route.startsWith("methods/")) {
@@ -3792,6 +4030,13 @@ local scenarios = {
     setupScrollReveals();
     setupAdvancedAnimations();
     closeSidebar();
+
+    if (route.startsWith("system/")) {
+      const systemId = route.split("/")[1];
+      progress.lastRoute = route;
+      progress.recents = [systemId, ...progress.recents.filter((id) => id !== systemId)].slice(0, 8);
+      persistProgressLocally();
+    }
   }
 
   function searchableText(system) {
@@ -3855,10 +4100,21 @@ local scenarios = {
       return;
     }
 
-    const systemMatches = systems.filter((system) => searchableText(system).includes(query)).slice(0, 16);
-    const conceptMatches = Object.values(conceptGuides).filter((guide) => searchableConceptText(guide).includes(query));
-    const methodMatches = methodCatalog.filter((method) => searchableMethodText(method).includes(query)).slice(0, 12);
-    const snippetMatches = workState.snippets.filter((snippet) => [snippet.title, snippet.code, ...snippet.tags].join(" ").toLocaleLowerCase("pt-BR").includes(query)).slice(0, 6);
+    const filters = {};
+    const textQuery = query.replace(/(risco|nivel|nível|fase|tipo):([^\s]+)/g, (_match, key, value) => {
+      filters[key.normalize("NFD").replace(/[\u0300-\u036f]/g, "")] = value;
+      return "";
+    }).trim();
+    const systemMatches = systems.filter((system) => {
+      if (filters.risco && system.risk.toLocaleLowerCase("pt-BR") !== filters.risco) return false;
+      if (filters.nivel && (system.tier || "").toLocaleLowerCase("pt-BR") !== filters.nivel) return false;
+      if (filters.fase && String(system.phase) !== filters.fase) return false;
+      if (filters.tipo && system.category.toLocaleLowerCase("pt-BR").replaceAll(" ", "-") !== filters.tipo.replaceAll(" ", "-")) return false;
+      return !textQuery || searchableText(system).includes(textQuery);
+    }).slice(0, 24);
+    const conceptMatches = textQuery ? Object.values(conceptGuides).filter((guide) => searchableConceptText(guide).includes(textQuery)) : [];
+    const methodMatches = textQuery ? methodCatalog.filter((method) => searchableMethodText(method).includes(textQuery)).slice(0, 12) : [];
+    const snippetMatches = textQuery ? workState.snippets.filter((snippet) => [snippet.title, snippet.code, ...snippet.tags].join(" ").toLocaleLowerCase("pt-BR").includes(textQuery)).slice(0, 6) : [];
 
     searchResults.innerHTML = systemMatches.length || conceptMatches.length || methodMatches.length || snippetMatches.length ? `
       ${conceptMatches.map((guide) => `
@@ -3961,6 +4217,16 @@ local scenarios = {
       const payload = await response.json();
       const user = payload.user;
       if (!user) return;
+      currentUser = user;
+
+      if (user.sub && activeAccountId !== user.sub) {
+        activeAccountId = user.sub;
+        localStorage.setItem(ACTIVE_ACCOUNT_KEY, activeAccountId);
+        progress = loadProgress();
+        workState = loadWorkState();
+        renderSystemNav();
+        render();
+      }
 
       const authUser = document.getElementById("auth-user");
       const avatar = document.getElementById("auth-user-avatar");
@@ -3974,7 +4240,9 @@ local scenarios = {
         avatarFallback.hidden = true;
       }
       authUser.hidden = false;
+      document.getElementById("admin-nav").hidden = !user.isAdmin;
       refreshIcons();
+      await hydrateLearningProfile();
     } catch (_error) {
       // The guide can still run behind another static development server.
     }
@@ -4257,6 +4525,113 @@ local scenarios = {
       return;
     }
 
+    const favoriteTarget = event.target.closest("[data-favorite]");
+    if (favoriteTarget) {
+      const systemId = favoriteTarget.dataset.favorite;
+      progress.favorites[systemId] = !progress.favorites[systemId];
+      saveProgress();
+      render();
+      showToast(progress.favorites[systemId] ? "Adicionado aos favoritos." : "Removido dos favoritos.");
+      return;
+    }
+
+    if (event.target.closest("[data-export-profile]")) {
+      const blob = new Blob([JSON.stringify(buildLearningProfile(), null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `neon-academy-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      showToast("Backup exportado.");
+      return;
+    }
+
+    if (event.target.closest("[data-import-profile]")) {
+      document.getElementById("profile-import").click();
+      return;
+    }
+
+    if (event.target.closest("[data-sync-now]")) {
+      syncStatus = syncStatus === "unavailable" ? "unavailable" : "saving";
+      pushLearningProfile().then(() => {
+        render();
+        showToast(syncStatus === "synced" ? "Perfil sincronizado." : "Cópia local preservada.");
+      });
+      return;
+    }
+
+    const labResetTarget = event.target.closest("[data-lab-reset]");
+    if (labResetTarget) {
+      const system = getSystem(labResetTarget.dataset.labReset);
+      progress.labDrafts[system.id] = createLabStarter(system);
+      labFeedback = "Rascunho reiniciado.";
+      saveProgress();
+      render();
+      return;
+    }
+
+    const labCopyTarget = event.target.closest("[data-copy-lab]");
+    if (labCopyTarget) {
+      const system = getSystem(labCopyTarget.dataset.copyLab);
+      copyText(progress.labDrafts[system.id] || createLabStarter(system));
+      return;
+    }
+
+    const labCheckTarget = event.target.closest("[data-lab-check]");
+    if (labCheckTarget) {
+      const system = getSystem(labCheckTarget.dataset.labCheck);
+      const draft = progress.labDrafts[system.id] || "";
+      const checks = [
+        [draft.includes("function"), "função declarada"],
+        [draft.includes("player"), "contexto do jogador"],
+        [/return\s+[A-Za-z_]/.test(draft), "retorno do módulo"],
+        [/valid|assert|type\s*\(/i.test(draft), "validação explícita"]
+      ];
+      const passed = checks.filter(([ok]) => ok).length;
+      labFeedback = `${passed}/4 sinais encontrados: ${checks.filter(([ok]) => ok).map(([, label]) => label).join(", ") || "nenhum ainda"}.`;
+      render();
+      return;
+    }
+
+    const tutorSuggestion = event.target.closest("[data-tutor-suggestion]");
+    if (tutorSuggestion) {
+      const input = document.getElementById("tutor-question");
+      input.value = tutorSuggestion.dataset.tutorSuggestion;
+      input.focus();
+      return;
+    }
+
+    const speakTarget = event.target.closest("[data-speak]");
+    if (speakTarget && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(speakTarget.dataset.speak);
+      utterance.lang = "pt-BR";
+      window.speechSynthesis.speak(utterance);
+      return;
+    }
+
+    const voiceTarget = event.target.closest("[data-voice-input]");
+    if (voiceTarget) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        showToast("Reconhecimento de voz não está disponível neste navegador.");
+        return;
+      }
+      const recognition = new SpeechRecognition();
+      recognition.lang = "pt-BR";
+      recognition.interimResults = false;
+      recognition.onresult = (voiceEvent) => {
+        const input = document.getElementById("tutor-question");
+        input.value = voiceEvent.results[0][0].transcript;
+        input.focus();
+      };
+      recognition.onerror = () => showToast("Não consegui ouvir. Confira a permissão do microfone.");
+      recognition.start();
+      showToast("Ouvindo sua pergunta...");
+      return;
+    }
+
     const copyTarget = event.target.closest("[data-copy-code]");
     if (copyTarget) {
       copyCode(copyTarget.dataset.copyCode);
@@ -4315,6 +4690,20 @@ local scenarios = {
       return;
     }
 
+    const quizSystemId = event.target.dataset.quizSystem;
+    if (quizSystemId) {
+      progress.quizAnswers[quizSystemId] = event.target.value;
+      saveProgress();
+      render();
+      return;
+    }
+
+    if (event.target.matches("[data-lab-system]")) {
+      labFeedback = "";
+      routeTo(`lab/${event.target.value}`);
+      return;
+    }
+
     const taskId = event.target.dataset.workTask;
     if (taskId) {
       const taskItem = workState.tasks.find((item) => item.id === taskId);
@@ -4344,10 +4733,51 @@ local scenarios = {
     } else if (event.target.matches("[data-work-project-name]")) {
       workState.project.name = event.target.value;
       saveWorkState(false);
+    } else if (event.target.matches("[data-system-note]")) {
+      progress.systemNotes[event.target.dataset.systemNote] = event.target.value;
+      saveProgress();
+    } else if (event.target.matches("[data-lab-draft]")) {
+      progress.labDrafts[event.target.dataset.labDraft] = event.target.value;
+      saveProgress();
+    }
+  });
+
+  document.getElementById("profile-import").addEventListener("change", async (event) => {
+    const [file] = event.target.files;
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const imported = JSON.parse(await file.text());
+      if (!imported || imported.version !== 2 || !imported.progress || !imported.workspace) {
+        throw new Error("Formato incompatível.");
+      }
+      localStorage.setItem(`${STORAGE_KEY}:${activeAccountId}`, JSON.stringify(imported.progress));
+      localStorage.setItem(`${WORKSPACE_KEY}:${activeAccountId}`, JSON.stringify(imported.workspace));
+      progress = loadProgress();
+      workState = loadWorkState();
+      progress.updatedAt = Date.now();
+      saveProgress();
+      renderSystemNav();
+      render();
+      showToast("Backup importado com sucesso.");
+    } catch (_error) {
+      showToast("Não foi possível importar este backup.");
     }
   });
 
   document.addEventListener("submit", (event) => {
+    const tutorForm = event.target.closest("[data-tutor-form]");
+    if (tutorForm) {
+      event.preventDefault();
+      const formData = new FormData(tutorForm);
+      const question = String(formData.get("question") || "").trim();
+      if (!question) return;
+      progress.tutorMessages.push({ role: "user", text: question }, { role: "assistant", text: tutorReply(question) });
+      progress.tutorMessages = progress.tutorMessages.slice(-20);
+      saveProgress();
+      render();
+      return;
+    }
     const form = event.target.closest("[data-work-form]");
     if (!form) return;
     event.preventDefault();
@@ -4371,6 +4801,7 @@ local scenarios = {
         credentials: "same-origin"
       });
     } finally {
+      localStorage.removeItem(ACTIVE_ACCOUNT_KEY);
       window.location.replace("/login");
     }
   });
@@ -4382,6 +4813,37 @@ local scenarios = {
     updateSearch();
     searchInput.focus();
   });
+
+  document.addEventListener("keydown", (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "k") {
+      event.preventDefault();
+      searchInput.focus();
+      searchInput.select();
+    }
+  });
+
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    document.getElementById("install-button").hidden = false;
+  });
+  document.getElementById("install-button").addEventListener("click", async () => {
+    if (!deferredInstallPrompt) return;
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    document.getElementById("install-button").hidden = true;
+  });
+
+  if ("serviceWorker" in navigator && (window.location.protocol === "https:" || window.location.hostname === "localhost")) {
+    navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+  }
+
+  window.addEventListener("online", () => {
+    syncStatus = syncStatus === "unavailable" ? "unavailable" : "saving";
+    scheduleCloudSync();
+  });
+  window.addEventListener("offline", () => { syncStatus = "offline"; });
 
   window.addEventListener("hashchange", render);
   window.addEventListener("scroll", scheduleScrollEffects, { passive: true });

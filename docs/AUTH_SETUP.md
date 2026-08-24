@@ -43,6 +43,7 @@ PORT=3000
 PUBLIC_BASE_URL=https://neon-studios-system-academy.onrender.com
 GOOGLE_CLIENT_ID=000000000000-exemplo.apps.googleusercontent.com
 GOOGLE_ALLOWED_EMAIL_DOMAIN=
+ADMIN_EMAILS=seu-email@gmail.com
 RECAPTCHA_SITE_KEY=sua_chave_publica
 RECAPTCHA_SECRET_KEY=seu_segredo
 RECAPTCHA_VERSION=v3
@@ -58,6 +59,8 @@ TRUST_PROXY=true
 
 Deixe `GOOGLE_ALLOWED_EMAIL_DOMAIN` vazio para aceitar qualquer conta Google verificada. Para aceitar somente contas administradas por um Google Workspace, use o domínio exato, por exemplo `minhaempresa.com.br`.
 
+`ADMIN_EMAILS` aceita uma ou mais contas separadas por vírgula. Somente essas contas recebem a permissão administrativa dentro da sessão assinada; depois de alterar essa variável, saia e entre novamente.
+
 Gere `AUTH_SESSION_SECRET` uma única vez e mantenha o mesmo valor no Render:
 
 ```powershell
@@ -65,6 +68,18 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'
 ```
 
 A sessão é assinada e fica no cookie `HttpOnly`; por isso ela sobrevive à hibernação do Render Free sem disco. Trocar essa variável invalida todas as sessões existentes.
+
+### Sincronizar o progresso entre dispositivos
+
+A Academy usa armazenamento local automaticamente. Para sincronizar progresso, favoritos, notas, laboratório e workspace entre dispositivos, configure uma URL PostgreSQL:
+
+```dotenv
+DATABASE_URL=postgresql://usuario:senha@host:5432/banco
+```
+
+O servidor cria a tabela `academy_learning_profiles` no primeiro acesso e separa os dados pelo identificador imutável da conta Google. Se `DATABASE_URL` estiver vazio ou o banco estiver temporariamente indisponível, o navegador preserva a cópia local e continua funcionando.
+
+O PostgreSQL gratuito do Render é adequado apenas para testes porque expira. Para uso contínuo, conecte um banco durável e mantenha backups antes de depender da sincronização.
 
 ## 5. Apontar o domínio
 
