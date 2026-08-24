@@ -4392,7 +4392,7 @@ local scenarios = {
     };
     content.innerHTML = `
       <header class="page-header"><div><div class="eyebrow">${icon("gem")} Neon Academy</div><h1>Plus e Cubic Energy</h1><p class="lead">Expanda sua rotina de estudo sem misturar compras com o progresso pedagógico.</p></div></header>
-      ${success ? `<div class="purchase-return ${checkoutReturn.confirmed ? "confirmed" : "pending"}">${icon(checkoutReturn.confirmed ? "badge-check" : "loader-circle")}<div><strong>${checkoutReturn.confirmed ? "Pagamento confirmado pelo Stripe" : "Aguardando confirmação assinada"}</strong><span>${checkoutReturn.confirmed ? "A compra é válida. O benefício será refletido assim que o webhook terminar o processamento." : "Não feche esta página. A validação pode levar alguns segundos."}</span></div></div>` : ""}
+      ${success ? `<div class="purchase-return ${checkoutReturn.confirmed ? "confirmed" : "pending"}">${icon(checkoutReturn.confirmed ? "badge-check" : "loader-circle")}<div><strong>${checkoutReturn.confirmed ? "Pagamento confirmado pela Stripe" : "Aguardando confirmação assinada"}</strong><span>${checkoutReturn.confirmed ? "Compra sincronizada com segurança. Seu benefício já está disponível na conta." : "Não feche esta página. A validação pode levar alguns segundos."}</span></div></div>` : ""}
       ${!checkoutAvailable ? `<section class="store-availability">${icon("construction")}<div><strong>Loja em configuração</strong><p>Compras permanecem bloqueadas até banco, Price IDs e webhook Stripe estarem validados no servidor.</p></div></section>` : ""}
       <section class="plus-offer"><div class="plus-mark">${icon("infinity")}</div><div><span>Assinatura mensal</span><h2>Neon Academy Plus</h2><p>Energia infinita, histórico maior do tutor e personalização completa da Academy.</p><ul><li>${icon("check")} Energia infinita nas Áreas</li><li>${icon("check")} Conversas maiores com o tutor</li><li>${icon("palette")} Temas Plus, fundos locais e busca Pexels quando configurada</li></ul></div><div class="plus-price"><span>${commerceAccount.plusActive ? "Plano ativo" : "Por mês"}</span><strong>${plus ? formatBRL(plus.amountCents) : "R$ 129,90"}</strong><button class="button primary" type="button" data-buy-product="plus-monthly" ${!checkoutAvailable || commerceAccount.plusActive ? "disabled" : ""}>${commerceAccount.plusActive ? "Plus ativo" : checkoutAvailable ? "Assinar Plus" : "Checkout em configuração"}</button></div></section>
       <section class="content-section"><div class="section-heading"><div><div class="eyebrow">Pacotes avulsos</div><h2>Cubic Energy</h2></div><p>Energia comprada nunca é removida por Renascimento.</p></div><div class="energy-store-grid">${energyProducts.length ? energyProducts.map((product) => `<article class="energy-product"><div>${icon("box")}<span>${product.energy}</span></div><h3>Cubic Energy</h3>${product.compareAtCents ? `<del>${formatBRL(product.compareAtCents)}</del>` : ""}<strong>${formatBRL(product.amountCents)}</strong><button class="button" type="button" data-buy-product="${product.id}" ${checkoutAvailable ? "" : "disabled"}>${checkoutAvailable ? "Comprar" : "Indisponível"}</button></article>`).join("") : '<div class="empty-state">Carregando catálogo seguro...</div>'}</div></section>
@@ -4469,14 +4469,7 @@ local scenarios = {
     if (window.location.protocol === "file:") return;
     const checkoutSessionId = new URLSearchParams(window.location.search).get("session_id") || "";
     const catalogRequest = fetch("/api/commerce/catalog", { credentials: "same-origin", cache: "no-store" });
-    const secondaryRequests = [
-      fetch("/api/commerce/account", { credentials: "same-origin", cache: "no-store" }),
-      fetch("/api/commerce/ledger", { credentials: "same-origin", cache: "no-store" }),
-      fetch("/api/tutor/audio/config", { credentials: "same-origin", cache: "no-store" }),
-      checkoutSessionId
-        ? fetch(`/api/commerce/session?sessionId=${encodeURIComponent(checkoutSessionId)}`, { credentials: "same-origin", cache: "no-store" })
-        : Promise.resolve(null),
-    ];
+    let checkoutResponse = null;
 
     try {
       const catalogResponse = await catalogRequest;
@@ -4493,11 +4486,22 @@ local scenarios = {
     updateProgressUI();
     if (currentRoute().startsWith("store")) render();
 
-    const [accountResult, ledgerResult, audioResult, checkoutResult] = await Promise.allSettled(secondaryRequests);
+    if (checkoutSessionId) {
+      try {
+        checkoutResponse = await fetch(`/api/commerce/session?sessionId=${encodeURIComponent(checkoutSessionId)}`, { credentials: "same-origin", cache: "no-store" });
+      } catch (_error) {
+        checkoutReturn.checked = true;
+      }
+    }
+
+    const [accountResult, ledgerResult, audioResult] = await Promise.allSettled([
+      fetch("/api/commerce/account", { credentials: "same-origin", cache: "no-store" }),
+      fetch("/api/commerce/ledger", { credentials: "same-origin", cache: "no-store" }),
+      fetch("/api/tutor/audio/config", { credentials: "same-origin", cache: "no-store" }),
+    ]);
     const accountResponse = accountResult.status === "fulfilled" ? accountResult.value : null;
     const ledgerResponse = ledgerResult.status === "fulfilled" ? ledgerResult.value : null;
     const audioResponse = audioResult.status === "fulfilled" ? audioResult.value : null;
-    const checkoutResponse = checkoutResult.status === "fulfilled" ? checkoutResult.value : null;
 
     try {
       if (ledgerResponse?.ok) {

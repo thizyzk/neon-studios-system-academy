@@ -1097,12 +1097,24 @@ async function handleCommerceSession(request, response, requestUrl) {
   }
   const confirmed = checkout.status === "complete"
     && ["paid", "no_payment_required"].includes(checkout.payment_status);
+  let reconciliation = null;
+  let account = null;
+  if (confirmed && commerceStore.available) {
+    reconciliation = await commerceStore.processStripeEvent({
+      id: `checkout_reconciliation:${checkout.id}`,
+      type: "checkout.session.completed",
+      data: { object: checkout },
+    });
+    account = await commerceStore.getAccount(session.user);
+  }
   sendJson(response, 200, {
     ok: true,
     confirmed,
+    reconciled: reconciliation?.processed === true || reconciliation?.reason === "duplicate",
     status: checkout.status,
     paymentStatus: checkout.payment_status,
     productId: checkout.metadata?.product_id || "",
+    account,
   });
 }
 
