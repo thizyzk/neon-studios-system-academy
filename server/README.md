@@ -1,4 +1,24 @@
-# TikTok Reels Server
+# Neon Studios System Academy Server
+
+Servidor Node.js da Academy: Google Identity, reCAPTCHA, progresso opcional em PostgreSQL, loja Stripe com ledger de energia e integracao TikTok/Roblox.
+
+Para configurar monetizacao e entender por que os recursos sociais continuam bloqueados, leia [MONETIZATION_AND_COMMUNITY.md](./MONETIZATION_AND_COMMUNITY.md).
+
+## Execucao local
+
+1. Copie `.env.example` para `.env` e preencha somente os valores usados.
+2. Instale e inicie:
+
+```powershell
+npm install
+npm start
+```
+
+3. Abra `http://localhost:3000`.
+
+Sem `DATABASE_URL`, a loja permanece indisponivel e o progresso usa o navegador. Esse comportamento e intencional.
+
+## TikTok Reels
 
 Proxy seguro entre o Roblox e a TikTok Display API.
 

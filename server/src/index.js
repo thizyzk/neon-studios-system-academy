@@ -5,7 +5,10 @@ import path from "node:path";
 import { URL } from "node:url";
 
 import { OAuth2Client } from "google-auth-library";
+import Stripe from "stripe";
 
+import { COMMERCE_CATALOG, findCommerceProduct } from "./commerceCatalog.js";
+import { createCommerceStore } from "./commerceStore.js";
 import { readConfig } from "./config.js";
 import { createLearningStore } from "./learningStore.js";
 import { createSignedSession, verifySignedSession } from "./signedSession.js";
@@ -17,10 +20,13 @@ const STATE_MAX_AGE_SECONDS = 10 * 60;
 const TOKEN_REFRESH_SKEW_MS = 10 * 60 * 1000;
 const MAX_AUTH_BODY_BYTES = 20 * 1024;
 const MAX_LEARNING_PROFILE_BODY_BYTES = 600 * 1024;
+const MAX_COMMERCE_BODY_BYTES = 64 * 1024;
 const authRateLimitWindowMs = config.authRateLimitWindowSeconds * 1000;
 const googleClient = config.googleClientId ? new OAuth2Client(config.googleClientId) : null;
 const authAttempts = new Map();
 const learningStore = createLearningStore(config.databaseUrl);
+const commerceStore = createCommerceStore(config.databaseUrl);
+const stripe = config.stripeSecretKey ? new Stripe(config.stripeSecretKey) : null;
 
 const contentTypes = new Map([
   [".css", "text/css; charset=utf-8"],
@@ -47,7 +53,7 @@ function applySecurityHeaders(response) {
     "default-src 'self'",
     "script-src 'self' https://accounts.google.com https://www.google.com https://www.gstatic.com",
     "style-src 'self' 'unsafe-inline' https://accounts.google.com",
-    "frame-src https://accounts.google.com https://www.google.com https://recaptcha.google.com",
+    "frame-src https://accounts.google.com https://www.google.com https://recaptcha.google.com https://play.luau.org",
     "connect-src 'self' https://accounts.google.com https://www.google.com",
     "img-src 'self' data: https://lh3.googleusercontent.com https://*.googleusercontent.com",
     "font-src 'self' data:",
@@ -204,6 +210,21 @@ async function readJsonBody(request, maximumBytes = MAX_AUTH_BODY_BYTES) {
     error.statusCode = 400;
     throw error;
   }
+}
+
+async function readRawBody(request, maximumBytes) {
+  const chunks = [];
+  let receivedBytes = 0;
+  for await (const chunk of request) {
+    receivedBytes += chunk.length;
+    if (receivedBytes > maximumBytes) {
+      const error = new Error("Request body is too large.");
+      error.statusCode = 413;
+      throw error;
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
 }
 
 async function verifyRecaptcha(token, remoteIp) {
@@ -758,6 +779,163 @@ async function handleLearningProfileWrite(request, response) {
   });
 }
 
+function publicCatalog() {
+  return COMMERCE_CATALOG.map((product) => ({
+    id: product.id,
+    type: product.type,
+    name: product.name,
+    description: product.description,
+    energy: product.energy ?? null,
+    amountCents: product.amountCents,
+    compareAtCents: product.compareAtCents ?? null,
+    currency: product.currency,
+    interval: product.interval ?? null,
+  }));
+}
+
+async function handleCommerceCatalog(request, response) {
+  const session = await requireAuthSession(request, response);
+  if (!session) return;
+  sendJson(response, 200, {
+    ok: true,
+    products: publicCatalog(),
+    checkoutAvailable: Boolean(stripe && commerceStore.available && config.stripeWebhookSecret),
+  });
+}
+
+async function handleCommerceAccount(request, response) {
+  const session = await requireAuthSession(request, response);
+  if (!session) return;
+  if (!commerceStore.available) {
+    sendJson(response, 200, { ok: true, available: false, purchasedEnergy: 0, plusActive: false });
+    return;
+  }
+  const account = await commerceStore.getAccount(session.user);
+  sendJson(response, 200, { ok: true, available: true, ...account });
+}
+
+async function handleCommerceCheckout(request, response) {
+  const session = await requireAuthSession(request, response);
+  if (!session) return;
+  if (!isTrustedRequestOrigin(request)) {
+    sendJson(response, 403, { ok: false, error: "InvalidOrigin" });
+    return;
+  }
+  if (!stripe || !commerceStore.available || !config.stripeWebhookSecret) {
+    sendJson(response, 503, { ok: false, error: "CheckoutUnavailable" });
+    return;
+  }
+
+  const body = await readJsonBody(request, MAX_COMMERCE_BODY_BYTES);
+  const product = findCommerceProduct(body.productId);
+  if (!product) {
+    sendJson(response, 400, { ok: false, error: "UnknownProduct" });
+    return;
+  }
+
+  const metadata = {
+    user_sub: session.user.sub,
+    product_id: product.id,
+    product_type: product.type,
+    energy: String(product.energy ?? 0),
+  };
+  const priceData = {
+    currency: product.currency,
+    unit_amount: product.amountCents,
+    product_data: { name: product.name, description: product.description },
+  };
+  if (product.type === "subscription") {
+    priceData.recurring = { interval: product.interval };
+  }
+
+  const stripeCustomerId = await commerceStore.getStripeCustomerId(session.user);
+
+  const checkout = await stripe.checkout.sessions.create({
+    mode: product.type === "subscription" ? "subscription" : "payment",
+    ...(stripeCustomerId ? { customer: stripeCustomerId } : { customer_email: session.user.email }),
+    client_reference_id: session.user.sub,
+    line_items: [{ quantity: 1, price_data: priceData }],
+    metadata,
+    ...(product.type === "subscription" ? { subscription_data: { metadata } } : {}),
+    ...(product.type === "energy" ? { payment_intent_data: { metadata } } : {}),
+    success_url: `${config.publicBaseUrl}/#store/success`,
+    cancel_url: `${config.publicBaseUrl}/#store`,
+  });
+  sendJson(response, 200, { ok: true, checkoutUrl: checkout.url });
+}
+
+async function handleCommercePortal(request, response) {
+  const session = await requireAuthSession(request, response);
+  if (!session) return;
+  if (!isTrustedRequestOrigin(request)) {
+    sendJson(response, 403, { ok: false, error: "InvalidOrigin" });
+    return;
+  }
+  if (!stripe || !commerceStore.available) {
+    sendJson(response, 503, { ok: false, error: "BillingPortalUnavailable" });
+    return;
+  }
+  const stripeCustomerId = await commerceStore.getStripeCustomerId(session.user);
+  if (!stripeCustomerId) {
+    sendJson(response, 404, { ok: false, error: "StripeCustomerNotFound" });
+    return;
+  }
+  const portal = await stripe.billingPortal.sessions.create({
+    customer: stripeCustomerId,
+    return_url: `${config.publicBaseUrl}/#store`,
+  });
+  sendJson(response, 200, { ok: true, portalUrl: portal.url });
+}
+
+async function handleCommerceEnergyConsume(request, response) {
+  const session = await requireAuthSession(request, response);
+  if (!session) return;
+  if (!isTrustedRequestOrigin(request)) {
+    sendJson(response, 403, { ok: false, error: "InvalidOrigin" });
+    return;
+  }
+  if (!commerceStore.available) {
+    sendJson(response, 503, { ok: false, error: "CommerceUnavailable" });
+    return;
+  }
+  const body = await readJsonBody(request, MAX_COMMERCE_BODY_BYTES);
+  const result = await commerceStore.consumeEnergy(session.user, 1, String(body.reason || "learning_session").slice(0, 80));
+  sendJson(response, result.ok ? 200 : 409, result);
+}
+
+async function handleStripeWebhook(request, response) {
+  if (!stripe || !commerceStore.available || !config.stripeWebhookSecret) {
+    sendJson(response, 503, { ok: false, error: "WebhookUnavailable" });
+    return;
+  }
+  const signature = request.headers["stripe-signature"];
+  if (typeof signature !== "string") {
+    sendJson(response, 400, { ok: false, error: "MissingStripeSignature" });
+    return;
+  }
+  const rawBody = await readRawBody(request, MAX_COMMERCE_BODY_BYTES);
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(rawBody, signature, config.stripeWebhookSecret);
+  } catch (_error) {
+    sendJson(response, 400, { ok: false, error: "InvalidStripeSignature" });
+    return;
+  }
+  const result = await commerceStore.processStripeEvent(event);
+  sendJson(response, 200, { ok: true, received: true, processed: result.processed });
+}
+
+async function handleCommunityStatus(request, response) {
+  const session = await requireAuthSession(request, response);
+  if (!session) return;
+  sendJson(response, 200, {
+    ok: true,
+    enabled: config.communityEnabled,
+    safetyGate: true,
+    capabilities: { friends: false, groups: false, images: false, calls: false, streaming: false },
+  });
+}
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -776,6 +954,8 @@ async function route(request, response) {
       service: "neon-studios-system-academy",
       authConfigured: isAuthConfigured(),
       learningSyncConfigured: learningStore.available,
+      commerceConfigured: Boolean(stripe && commerceStore.available && config.stripeWebhookSecret),
+      communityEnabled: config.communityEnabled,
     });
     return;
   }
@@ -810,6 +990,41 @@ async function route(request, response) {
     return;
   }
 
+  if (request.method === "GET" && requestUrl.pathname === "/api/commerce/catalog") {
+    await handleCommerceCatalog(request, response);
+    return;
+  }
+
+  if (request.method === "GET" && requestUrl.pathname === "/api/commerce/account") {
+    await handleCommerceAccount(request, response);
+    return;
+  }
+
+  if (request.method === "POST" && requestUrl.pathname === "/api/commerce/checkout") {
+    await handleCommerceCheckout(request, response);
+    return;
+  }
+
+  if (request.method === "POST" && requestUrl.pathname === "/api/commerce/portal") {
+    await handleCommercePortal(request, response);
+    return;
+  }
+
+  if (request.method === "POST" && requestUrl.pathname === "/api/commerce/energy/consume") {
+    await handleCommerceEnergyConsume(request, response);
+    return;
+  }
+
+  if (request.method === "POST" && requestUrl.pathname === "/api/commerce/webhook") {
+    await handleStripeWebhook(request, response);
+    return;
+  }
+
+  if (request.method === "GET" && requestUrl.pathname === "/api/community/status") {
+    await handleCommunityStatus(request, response);
+    return;
+  }
+
   if (request.method === "GET" && requestUrl.pathname === "/login") {
     if (await getAuthSession(request)) {
       redirect(response, "/");
@@ -829,7 +1044,16 @@ async function route(request, response) {
     return;
   }
 
-  if (request.method === "GET" && ["/auth.css", "/auth.js", "/legal.js", "/assets/lucide.min.js"].includes(requestUrl.pathname)) {
+  if (request.method === "GET" && [
+    "/auth.css",
+    "/auth.js",
+    "/legal.js",
+    "/academy-effects.js",
+    "/academy-scene.js",
+    "/assets/lucide.min.js",
+    "/assets/vendor/three.module.min.js",
+    "/assets/vendor/three.core.min.js",
+  ].includes(requestUrl.pathname)) {
     if (!await sendSiteFile(response, requestUrl.pathname)) {
       sendJson(response, 404, { ok: false, error: "NotFound" });
     }

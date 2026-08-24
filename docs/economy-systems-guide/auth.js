@@ -9,6 +9,15 @@
   const googleButton = document.getElementById("google-button");
   const accountPolicy = document.getElementById("account-policy");
 
+  try {
+    const visualSettings = JSON.parse(localStorage.getItem("neon-academy-visual-settings-v1") || "{}");
+    for (const [name, value] of Object.entries(visualSettings)) {
+      if (typeof value === "boolean") document.body.dataset[name] = String(value);
+    }
+  } catch (_error) {
+    // Invalid local preferences fall back to the animated defaults.
+  }
+
   let captchaWidgetId = null;
   let captchaToken = "";
   let activeConfig = null;

@@ -10,6 +10,8 @@
   <link rel="stylesheet" href="auth.css">
 </head>
 <body>
+  <canvas id="academy-scene" class="auth-scene-canvas" aria-hidden="true"></canvas>
+  <canvas id="pointer-trail" class="auth-pointer-trail" aria-hidden="true"></canvas>
   <div class="auth-ambient" aria-hidden="true">
     <div class="auth-grid"></div>
     <div class="auth-glow"></div>
@@ -61,6 +63,8 @@
   </main>
 
   <script src="assets/lucide.min.js"></script>
+  <script src="academy-effects.js"></script>
   <script src="auth.js"></script>
+  <script type="module" src="academy-scene.js"></script>
 </body>
 </html>

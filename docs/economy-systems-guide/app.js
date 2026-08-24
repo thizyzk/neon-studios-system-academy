@@ -3,6 +3,7 @@
 
   const STORAGE_KEY = "neon-academy-progress-v1";
   const THEME_KEY = "neon-academy-theme";
+  const VISUAL_SETTINGS_KEY = "neon-academy-visual-settings-v1";
   const WORKSPACE_KEY = "neon-academy-workspace-v1";
   const ACTIVE_ACCOUNT_KEY = "neon-academy-active-account";
   const learningTracks = window.NEON_ACADEMY_TRACKS || [];
@@ -2733,6 +2734,10 @@ local scenarios = {
   let deferredInstallPrompt = null;
   let labFeedback = "";
   let currentUser = null;
+  let activeQuiz = null;
+  let commerceAccount = { available: false, purchasedEnergy: 0, plusActive: false };
+  let commerceCatalog = [];
+  let checkoutAvailable = false;
 
   const content = document.getElementById("content");
   const sidebar = document.getElementById("sidebar");
@@ -2743,6 +2748,62 @@ local scenarios = {
   const searchClear = document.getElementById("search-clear");
   const toast = document.getElementById("toast");
 
+  function normalizeGameState(value) {
+    const source = value && typeof value === "object" ? value : {};
+    const today = new Date().toISOString().slice(0, 10);
+    const lastRefillDate = typeof source.lastRefillDate === "string" ? source.lastRefillDate : "";
+    let earnedEnergy = Number.isFinite(source.earnedEnergy) ? Math.max(0, Math.floor(source.earnedEnergy)) : 20;
+    if (lastRefillDate !== today) earnedEnergy = Math.max(earnedEnergy, 20);
+    return {
+      xp: Number.isFinite(source.xp) ? Math.max(0, Math.floor(source.xp)) : 0,
+      earnedEnergy,
+      prestige: Number.isFinite(source.prestige) ? Math.max(0, Math.min(3, Math.floor(source.prestige))) : 0,
+      completedSessions: source.completedSessions && typeof source.completedSessions === "object" ? source.completedSessions : {},
+      bestScores: source.bestScores && typeof source.bestScores === "object" ? source.bestScores : {},
+      correctAnswers: Number.isFinite(source.correctAnswers) ? Math.max(0, Math.floor(source.correctAnswers)) : 0,
+      wrongAnswers: Number.isFinite(source.wrongAnswers) ? Math.max(0, Math.floor(source.wrongAnswers)) : 0,
+      streak: Number.isFinite(source.streak) ? Math.max(0, Math.floor(source.streak)) : 0,
+      lastRefillDate: today,
+    };
+  }
+
+  function normalizeSettings(value) {
+    const source = value && typeof value === "object" ? value : {};
+    return {
+      mouseTrail: source.mouseTrail !== false,
+      clickEffects: source.clickEffects !== false,
+      sounds: source.sounds !== false,
+      particles: source.particles !== false,
+      scene3d: source.scene3d !== false,
+      spoilerMode: source.spoilerMode !== false,
+    };
+  }
+
+  function getGameLevel(xp = progress.game.xp) {
+    return Math.floor(xp / 250) + 1;
+  }
+
+  function getLevelProgress() {
+    const current = progress.game.xp % 250;
+    return { current, required: 250, percentage: Math.round((current / 250) * 100) };
+  }
+
+  function getRewardMultiplier() {
+    return 2 ** progress.game.prestige;
+  }
+
+  function getTotalEnergy() {
+    return progress.game.earnedEnergy + commerceAccount.purchasedEnergy;
+  }
+
+  function applyVisualSettings() {
+    for (const [name, value] of Object.entries(progress.settings)) {
+      document.body.dataset[name] = String(value);
+    }
+    localStorage.setItem(VISUAL_SETTINGS_KEY, JSON.stringify(progress.settings));
+    document.documentElement.classList.toggle("spoiler-mode", progress.settings.spoilerMode);
+  }
+
   function loadProgress() {
     try {
       const accountKey = `${STORAGE_KEY}:${activeAccountId}`;
@@ -2752,6 +2813,7 @@ local scenarios = {
         localStorage.removeItem(STORAGE_KEY);
       }
       const stored = JSON.parse(localStorage.getItem(accountKey) || legacyValue);
+      const sharedSettings = JSON.parse(localStorage.getItem(VISUAL_SETTINGS_KEY) || "{}");
       return {
         systems: stored?.systems && typeof stored.systems === "object" ? stored.systems : {},
         steps: stored?.steps && typeof stored.steps === "object" ? stored.steps : {},
@@ -2759,13 +2821,15 @@ local scenarios = {
         systemNotes: stored?.systemNotes && typeof stored.systemNotes === "object" ? stored.systemNotes : {},
         quizAnswers: stored?.quizAnswers && typeof stored.quizAnswers === "object" ? stored.quizAnswers : {},
         labDrafts: stored?.labDrafts && typeof stored.labDrafts === "object" ? stored.labDrafts : {},
-        tutorMessages: Array.isArray(stored?.tutorMessages) ? stored.tutorMessages.slice(-20) : [],
+        tutorMessages: Array.isArray(stored?.tutorMessages) ? stored.tutorMessages.slice(-40) : [],
+        game: normalizeGameState(stored?.game),
+        settings: normalizeSettings({ ...sharedSettings, ...stored?.settings }),
         recents: Array.isArray(stored?.recents) ? stored.recents.slice(0, 8) : [],
         lastRoute: typeof stored?.lastRoute === "string" ? stored.lastRoute : "",
         updatedAt: Number.isFinite(stored?.updatedAt) ? stored.updatedAt : 0
       };
     } catch (_error) {
-      return { systems: {}, steps: {}, favorites: {}, systemNotes: {}, quizAnswers: {}, labDrafts: {}, tutorMessages: [], recents: [], lastRoute: "", updatedAt: 0 };
+      return { systems: {}, steps: {}, favorites: {}, systemNotes: {}, quizAnswers: {}, labDrafts: {}, tutorMessages: [], game: normalizeGameState(), settings: normalizeSettings(), recents: [], lastRoute: "", updatedAt: 0 };
     }
   }
 
@@ -3001,7 +3065,9 @@ local scenarios = {
     document.querySelectorAll("[data-route]").forEach((element) => {
       const targetRoute = element.dataset.route;
       const isSectionRoot = (targetRoute === "methods" && route.startsWith("methods/"))
-        || (targetRoute === "workspace" && route.startsWith("workspace/"));
+        || (targetRoute === "workspace" && route.startsWith("workspace/"))
+        || (targetRoute === "areas" && route.startsWith("areas/"))
+        || (targetRoute === "store" && route.startsWith("store/"));
       element.classList.toggle("active", targetRoute === route || isSectionRoot);
     });
   }
@@ -3011,6 +3077,9 @@ local scenarios = {
     const percentage = Math.round((completed / systems.length) * 100);
     document.getElementById("sidebar-progress-label").textContent = `${percentage}%`;
     document.getElementById("sidebar-progress-bar").style.width = `${percentage}%`;
+    document.getElementById("resource-level").textContent = `LV ${getGameLevel()}`;
+    document.getElementById("resource-energy").textContent = commerceAccount.plusActive ? "∞" : String(getTotalEnergy());
+    applyVisualSettings();
     renderSystemNav();
     updateActiveNav();
     refreshIcons();
@@ -3970,10 +4039,322 @@ local scenarios = {
 
   function renderTutor() {
     const context = getSystem(progress.lastRoute.split("/")[1]) || getRecommendedSystem();
-    const messages = Array.isArray(progress.tutorMessages) ? progress.tutorMessages.slice(-8) : [];
+    const messages = Array.isArray(progress.tutorMessages) ? progress.tutorMessages.slice(commerceAccount.plusActive ? -20 : -8) : [];
     content.innerHTML = `
       <header class="page-header"><div><div class="eyebrow">${icon("messages-square")} Tutor contextual</div><h1>Converse com a Academy</h1><p class="lead">Pergunte sobre arquitetura, métodos, etapas e riscos usando o conteúdo técnico desta biblioteca.</p></div></header>
       <section class="tutor-shell"><aside><span>Contexto atual</span><strong>${context?.label || "Visão geral"}</strong><p>${context?.role || "Escolha uma aula para aprofundar a conversa."}</p><div class="tutor-suggestions">${["Como começar?", "Qual o maior risco?", "Explique a API", "Como testar?"].map((text) => `<button type="button" data-tutor-suggestion="${text}">${text}</button>`).join("")}</div></aside><div class="tutor-chat"><div class="tutor-messages" aria-live="polite">${messages.length ? messages.map((message) => `<article class="${message.role}"><span>${message.role === "user" ? "Você" : "Tutor"}</span><p>${escapeHtml(message.text)}</p>${message.role === "assistant" ? `<button class="icon-button" type="button" data-speak="${escapeHtml(message.text)}" aria-label="Ouvir resposta" title="Ouvir resposta">${icon("volume-2")}</button>` : ""}</article>`).join("") : `<article class="assistant"><span>Tutor</span><p>Estou usando ${context?.label || "a biblioteca"} como contexto. O que você quer entender primeiro?</p></article>`}</div><form class="tutor-form" data-tutor-form><button class="icon-button" type="button" data-voice-input aria-label="Perguntar por voz" title="Perguntar por voz">${icon("mic")}</button><label class="sr-only" for="tutor-question">Pergunta</label><input id="tutor-question" name="question" placeholder="Pergunte como pensar, implementar ou testar..." autocomplete="off" required><button class="button primary" type="submit">Enviar ${icon("send")}</button></form><small>Este tutor consulta o conteúdo local da Academy. Ele não envia seu código para um serviço externo.</small></div></section>`;
+  }
+
+  function academyAreas() {
+    const used = new Set(learningTracks.flatMap((track) => track.systems));
+    const areas = learningTracks.map((track, index) => ({
+      ...track,
+      minimumLevel: index * 2 + 1,
+      systems: track.systems.map(getSystem).filter(Boolean),
+    }));
+    const remaining = systems.filter((system) => !used.has(system.id));
+    const specializationNames = ["Arquitetura", "Produção", "Escala", "Operações", "Maestria"];
+    for (let index = 0; index < remaining.length; index += 7) {
+      const sequence = index / 7;
+      areas.push({
+        id: `specializations-${sequence + 1}`,
+        title: `Especialização: ${specializationNames[sequence] || `Nível ${sequence + 1}`}`,
+        icon: "orbit",
+        level: "Mestre",
+        description: "Sistemas complementares para consolidar uma arquitetura completa.",
+        minimumLevel: areas.length * 2 + 1,
+        systems: remaining.slice(index, index + 7),
+      });
+    }
+    return areas;
+  }
+
+  function sessionKey(areaId, systemId) {
+    return `${areaId}:${systemId}`;
+  }
+
+  function isSessionUnlocked(area, index) {
+    if (getGameLevel() < area.minimumLevel) return false;
+    if (index === 0) return true;
+    return Boolean(progress.game.completedSessions[sessionKey(area.id, area.systems[index - 1].id)]);
+  }
+
+  function makeQuestionOptions(correct, distractors, seed) {
+    const options = [correct, ...distractors.filter((value) => value && value !== correct)].filter((value, index, array) => array.indexOf(value) === index).slice(0, 4);
+    const rotation = seed % options.length;
+    return [...options.slice(rotation), ...options.slice(0, rotation)];
+  }
+
+  function makeSessionQuestions(system) {
+    const otherSystems = systems.filter((candidate) => candidate !== system);
+    const distract = (selector, offset) => otherSystems.slice(offset, offset + 5).map(selector).filter(Boolean);
+    const definitions = [
+      {
+        prompt: `Qual é a responsabilidade principal de ${system.name}?`,
+        correct: system.role,
+        distractors: distract((candidate) => candidate.role, 0),
+        explanation: `${system.name} existe para ${system.role.toLocaleLowerCase("pt-BR")}`,
+      },
+      {
+        prompt: `Onde está a fonte de verdade de ${system.label}?`,
+        correct: system.truth,
+        distractors: distract((candidate) => candidate.truth, 4),
+        explanation: `A fonte canônica evita duas cópias concorrentes: ${system.truth}`,
+      },
+      {
+        prompt: `Qual método pertence ao contrato de ${system.name}?`,
+        correct: system.methods[0][0],
+        distractors: distract((candidate) => candidate.methods?.[0]?.[0], 9),
+        explanation: `${system.methods[0][0]}: ${system.methods[0][1]} Retorno: ${system.methods[0][2]}.`,
+      },
+      {
+        prompt: `Qual regra precisa permanecer verdadeira em ${system.label}?`,
+        correct: system.invariants[0],
+        distractors: distract((candidate) => candidate.invariants?.[0], 14),
+        explanation: `Essa é uma invariante do sistema: ${system.invariants[0]}`,
+      },
+      {
+        prompt: `Qual cenário prova melhor o comportamento inicial de ${system.name}?`,
+        correct: system.tests[0],
+        distractors: distract((candidate) => candidate.tests?.[0], 19),
+        explanation: `O primeiro teste de confiança é: ${system.tests[0]}`,
+      },
+    ];
+    return definitions.map((question, index) => ({
+      ...question,
+      options: makeQuestionOptions(question.correct, question.distractors, system.id.length + index),
+    }));
+  }
+
+  function beginAreaSession(areaId, systemId) {
+    const area = academyAreas().find((candidate) => candidate.id === areaId);
+    const system = area?.systems.find((candidate) => candidate.id === systemId);
+    const index = area?.systems.indexOf(system);
+    if (!area || !system || index < 0 || !isSessionUnlocked(area, index)) return false;
+    if (!commerceAccount.plusActive && getTotalEnergy() <= 0) {
+      routeTo("store");
+      showToast("Você precisa de energia para iniciar uma sessão.");
+      return false;
+    }
+    activeQuiz = { areaId, systemId, index: 0, correct: 0, answered: false, selected: "", earnedXp: 0, finished: false };
+    return true;
+  }
+
+  function renderAreas() {
+    const level = getGameLevel();
+    const levelProgress = getLevelProgress();
+    const completedCount = Object.keys(progress.game.completedSessions).length;
+    content.innerHTML = `
+      <header class="page-header"><div><div class="eyebrow">${icon("map")} Caminho prático</div><h1>Áreas de domínio</h1><p class="lead">Avance sistema por sistema, prove o entendimento e desbloqueie áreas mais exigentes.</p></div><div class="header-actions"><button class="button" type="button" data-route="settings">${icon("sliders-horizontal")} Efeitos</button></div></header>
+      <section class="game-profile-bar"><div class="game-level-orb"><span>LV</span><strong>${level}</strong></div><div class="game-level-copy"><span>${progress.game.xp.toLocaleString("pt-BR")} XP · Renascimento ${progress.game.prestige}</span><div class="xp-track large"><i style="width:${levelProgress.percentage}%"></i></div><small>${levelProgress.current}/${levelProgress.required} XP para o próximo nível</small></div><div class="game-resource"><i data-lucide="box"></i><span>Cubic Energy</span><strong>${commerceAccount.plusActive ? "Infinita" : getTotalEnergy()}</strong></div>${level >= 10 && progress.game.prestige < 3 ? `<button class="button rebirth-button" type="button" data-rebirth-open>${icon("rotate-ccw")} Renascer</button>` : ""}</section>
+      <div class="area-map">${academyAreas().map((area, areaIndex) => {
+        const levelLocked = level < area.minimumLevel;
+        const done = area.systems.filter((system) => progress.game.completedSessions[sessionKey(area.id, system.id)]).length;
+        return `<section class="area-zone ${levelLocked ? "area-locked" : ""}" style="--area-index:${areaIndex}"><header><div class="area-number">${String(areaIndex + 1).padStart(2, "0")}</div><div><span>${area.level} · Nível ${area.minimumLevel}</span><h2>${area.title}</h2><p>${area.description}</p></div><strong>${done}/${area.systems.length}</strong></header><div class="area-path">${area.systems.map((system, index) => {
+          const unlocked = isSessionUnlocked(area, index);
+          const completed = progress.game.completedSessions[sessionKey(area.id, system.id)];
+          const best = progress.game.bestScores[sessionKey(area.id, system.id)] || 0;
+          return `<button class="area-session ${completed ? "completed" : ""} ${unlocked ? "" : "locked"}" type="button" ${unlocked ? `data-start-session="${area.id}:${system.id}"` : `data-locked-session="${levelLocked ? `Nível ${area.minimumLevel} necessário` : "Conclua a sessão anterior"}"`} aria-label="${system.label}${unlocked ? "" : ", bloqueado"}"><span>${completed ? icon("check") : unlocked ? icon(system.icon) : icon("lock-keyhole")}</span><strong>${system.label}</strong><small>${completed ? `Melhor resultado ${best}/5` : unlocked ? "Iniciar sessão" : levelLocked ? `Nível ${area.minimumLevel}` : "Bloqueado"}</small></button>`;
+        }).join("")}</div></section>`;
+      }).join("")}</div>
+      <section class="prestige-note"><div>${icon("sparkles")}<div><strong>Renascimento multiplica recompensas</strong><p>Disponível a partir do nível 10. Cada renascimento dobra XP e energia gratuita recebidos, até 8x.</p></div></div><span>${completedCount} sessões concluídas</span></section>`;
+  }
+
+  function renderAreaSession(areaId, systemId) {
+    const area = academyAreas().find((candidate) => candidate.id === areaId);
+    const system = area?.systems.find((candidate) => candidate.id === systemId);
+    if (!area || !system) {
+      routeTo("areas");
+      return;
+    }
+    if (!activeQuiz || activeQuiz.areaId !== areaId || activeQuiz.systemId !== systemId) {
+      if (!beginAreaSession(areaId, systemId)) return;
+    }
+    if (activeQuiz.finished) {
+      renderAreaResult(area, system);
+      return;
+    }
+    const questions = makeSessionQuestions(system);
+    const question = questions[activeQuiz.index];
+    const percentage = Math.round((activeQuiz.index / questions.length) * 100);
+    content.innerHTML = `
+      <section class="quiz-shell"><header class="quiz-topbar"><button class="icon-button" type="button" data-quit-session aria-label="Sair da sessão" title="Sair da sessão">${icon("x")}</button><div><i style="width:${percentage}%"></i></div><span>${activeQuiz.index + 1}/${questions.length}</span><strong>${commerceAccount.plusActive ? "∞" : getTotalEnergy()} ${icon("box")}</strong></header><div class="quiz-context"><span>${area.title}</span><strong>${system.name}</strong></div><main><div class="quiz-question-number">Pergunta ${String(activeQuiz.index + 1).padStart(2, "0")}</div><h1>${question.prompt}</h1><div class="quiz-options">${question.options.map((option, index) => {
+        const isSelected = activeQuiz.selected === option;
+        const isCorrect = option === question.correct;
+        const state = activeQuiz.answered ? (isCorrect ? "correct" : isSelected ? "wrong" : "muted") : "";
+        return `<button type="button" class="quiz-option ${state}" data-answer-index="${index}" ${activeQuiz.answered ? "disabled" : ""}><span>${String.fromCharCode(65 + index)}</span><p>${escapeHtml(option)}</p>${activeQuiz.answered && isCorrect ? icon("check-circle-2") : activeQuiz.answered && isSelected ? icon("x-circle") : ""}</button>`;
+      }).join("")}</div>${activeQuiz.answered ? `<section class="answer-feedback ${activeQuiz.selected === question.correct ? "success" : "error"}"><div>${icon(activeQuiz.selected === question.correct ? "sparkles" : "book-open-check")}<div><strong>${activeQuiz.selected === question.correct ? "Resposta correta" : "Resposta correta revelada"}</strong><p>${question.explanation}</p></div></div><button class="button primary" type="button" data-next-question>${activeQuiz.index === questions.length - 1 ? "Ver resultado" : "Continuar"} ${icon("arrow-right")}</button></section>` : ""}</main></section>`;
+  }
+
+  function renderAreaResult(area, system) {
+    const passed = activeQuiz.correct >= 4;
+    content.innerHTML = `<section class="quiz-result ${passed ? "passed" : "retry"}"><div class="result-emblem">${icon(passed ? "trophy" : "refresh-cw")}</div><span>${area.title}</span><h1>${passed ? "Sessão concluída" : "Quase lá"}</h1><p>${passed ? `Você demonstrou domínio inicial de ${system.label}.` : "Revise a explicação das respostas e tente novamente para desbloquear a próxima sessão."}</p><div class="result-stats"><article><span>Acertos</span><strong>${activeQuiz.correct}/5</strong></article><article><span>XP recebido</span><strong>+${activeQuiz.earnedXp}</strong></article><article><span>Multiplicador</span><strong>${getRewardMultiplier()}x</strong></article></div><div><button class="button" type="button" data-route="areas">${icon("map")} Voltar às Áreas</button><button class="button primary" type="button" data-retry-session="${area.id}:${system.id}">${passed ? "Praticar novamente" : "Tentar novamente"} ${icon("arrow-right")}</button></div></section>`;
+  }
+
+  async function consumePurchasedEnergy() {
+    try {
+      const response = await fetch("/api/commerce/energy/consume", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "wrong_quiz_answer" }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) return false;
+      commerceAccount.purchasedEnergy = payload.purchasedEnergy;
+      return true;
+    } catch (_error) {
+      commerceAccount.purchasedEnergy = 0;
+      return false;
+    }
+  }
+
+  async function answerAreaQuestion(optionIndex, target) {
+    if (!activeQuiz || activeQuiz.answered) return;
+    const area = academyAreas().find((candidate) => candidate.id === activeQuiz.areaId);
+    const system = area?.systems.find((candidate) => candidate.id === activeQuiz.systemId);
+    const question = system ? makeSessionQuestions(system)[activeQuiz.index] : null;
+    const selected = question?.options[optionIndex];
+    if (!question || selected === undefined) return;
+
+    const correct = selected === question.correct;
+    const previousLevel = getGameLevel();
+    activeQuiz.answered = true;
+    activeQuiz.selected = selected;
+    if (correct) {
+      const reward = 10 * getRewardMultiplier();
+      activeQuiz.correct += 1;
+      activeQuiz.earnedXp += reward;
+      progress.game.xp += reward;
+      progress.game.correctAnswers += 1;
+      progress.game.streak += 1;
+      if (progress.game.streak % 3 === 0 && !commerceAccount.plusActive) {
+        progress.game.earnedEnergy += getRewardMultiplier();
+      }
+      window.NeonEffects?.burst(target, "correct");
+    } else {
+      progress.game.wrongAnswers += 1;
+      progress.game.streak = 0;
+      if (!commerceAccount.plusActive) {
+        if (progress.game.earnedEnergy > 0) {
+          progress.game.earnedEnergy -= 1;
+        } else if (commerceAccount.purchasedEnergy > 0) {
+          const consumed = await consumePurchasedEnergy();
+          if (!consumed) showToast("Não foi possível atualizar a energia comprada.");
+        }
+      }
+      window.NeonEffects?.burst(target, "wrong");
+    }
+    saveProgress();
+    renderAreaSession(activeQuiz.areaId, activeQuiz.systemId);
+    if (getGameLevel() > previousLevel) {
+      window.NeonEffects?.burst(document.querySelector(".quiz-context"), "level");
+      showToast(`Você chegou ao nível ${getGameLevel()}!`);
+    }
+  }
+
+  function finishAreaSession() {
+    if (!activeQuiz) return;
+    const area = academyAreas().find((candidate) => candidate.id === activeQuiz.areaId);
+    const system = area?.systems.find((candidate) => candidate.id === activeQuiz.systemId);
+    if (!area || !system) return;
+    const key = sessionKey(area.id, system.id);
+    const passed = activeQuiz.correct >= 4;
+    progress.game.bestScores[key] = Math.max(progress.game.bestScores[key] || 0, activeQuiz.correct);
+    if (passed) {
+      const firstCompletion = !progress.game.completedSessions[key];
+      progress.game.completedSessions[key] = true;
+      progress.systems[system.id] = true;
+      if (firstCompletion) {
+        const bonus = 25 * getRewardMultiplier();
+        progress.game.xp += bonus;
+        activeQuiz.earnedXp += bonus;
+      }
+    }
+    activeQuiz.finished = true;
+    saveProgress();
+    renderAreaResult(area, system);
+    if (passed) window.NeonEffects?.burst(document.querySelector(".result-emblem"), "level");
+  }
+
+  function formatBRL(cents) {
+    return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cents / 100);
+  }
+
+  function renderStore(success = false) {
+    const plus = commerceCatalog.find((product) => product.type === "subscription");
+    const energyProducts = commerceCatalog.filter((product) => product.type === "energy");
+    content.innerHTML = `
+      <header class="page-header"><div><div class="eyebrow">${icon("gem")} Neon Academy</div><h1>Plus e Cubic Energy</h1><p class="lead">Expanda sua rotina de estudo sem misturar compras com o progresso pedagógico.</p></div></header>
+      ${success ? `<div class="purchase-return">${icon("badge-check")}<div><strong>Pagamento recebido pelo checkout</strong><span>O saldo será atualizado após a confirmação assinada do provedor.</span></div></div>` : ""}
+      <section class="plus-offer"><div class="plus-mark">${icon("infinity")}</div><div><span>Assinatura mensal</span><h2>Neon Academy Plus</h2><p>Energia infinita, histórico maior do tutor e acesso aos recursos sociais quando forem liberados com segurança.</p><ul><li>${icon("check")} Energia infinita nas Áreas</li><li>${icon("check")} Conversas maiores com o tutor</li><li>${icon("shield-check")} Comunidade e mídia somente após os controles de segurança</li></ul></div><div class="plus-price"><span>${commerceAccount.plusActive ? "Plano ativo" : "Por mês"}</span><strong>${plus ? formatBRL(plus.amountCents) : "R$ 99,90"}</strong><button class="button primary" type="button" data-buy-product="plus-monthly" ${!checkoutAvailable || commerceAccount.plusActive ? "disabled" : ""}>${commerceAccount.plusActive ? "Plus ativo" : checkoutAvailable ? "Assinar Plus" : "Checkout em configuração"}</button></div></section>
+      <section class="content-section"><div class="section-heading"><div><div class="eyebrow">Pacotes avulsos</div><h2>Cubic Energy</h2></div><p>Energia comprada nunca é removida por Renascimento.</p></div><div class="energy-store-grid">${energyProducts.length ? energyProducts.map((product) => `<article class="energy-product"><div>${icon("box")}<span>${product.energy}</span></div><h3>Cubic Energy</h3>${product.compareAtCents ? `<del>${formatBRL(product.compareAtCents)}</del>` : ""}<strong>${formatBRL(product.amountCents)}</strong><button class="button" type="button" data-buy-product="${product.id}" ${checkoutAvailable ? "" : "disabled"}>${checkoutAvailable ? "Comprar" : "Indisponível"}</button></article>`).join("") : '<div class="empty-state">Carregando catálogo seguro...</div>'}</div></section>
+      <section class="store-disclosure">${icon("shield-check")}<p>Preços e saldo são validados no servidor. Nenhum crédito é concedido antes do webhook do pagamento. Valores promocionais devem corresponder a preços reais praticados antes da publicação.</p></section>`;
+    if (commerceAccount.plusActive) {
+      const plusAction = content.querySelector('[data-buy-product="plus-monthly"]');
+      plusAction.disabled = false;
+      plusAction.removeAttribute("data-buy-product");
+      plusAction.dataset.manageBilling = "";
+      plusAction.textContent = "Gerenciar assinatura";
+    }
+  }
+
+  function renderSettings() {
+    const settings = [
+      ["mouseTrail", "Rastro RGB", "Rastro verde iluminado que acompanha o ponteiro."],
+      ["clickEffects", "Toques ao clicar", "Ondas visuais discretas no clique esquerdo."],
+      ["sounds", "Efeitos sonoros", "Sons de acerto, erro e subida de nível."],
+      ["particles", "Partículas", "Celebrações visuais nas respostas corretas."],
+      ["scene3d", "Cubos 3D", "Cena procedural que reage à rolagem."],
+      ["spoilerMode", "Proteção de código", "Scripts começam desfocados para compartilhamento de tela."],
+    ];
+    content.innerHTML = `<header class="page-header"><div><div class="eyebrow">${icon("settings")} Preferências</div><h1>Configurações da Academy</h1><p class="lead">Controle movimento, som e privacidade visual sem alterar seu progresso.</p></div></header><section class="settings-list">${settings.map(([key, title, description]) => `<label><span class="settings-icon">${icon(key === "sounds" ? "volume-2" : key === "scene3d" ? "box" : key === "spoilerMode" ? "eye-off" : "sparkles")}</span><span><strong>${title}</strong><small>${description}</small></span><input type="checkbox" role="switch" data-setting="${key}" ${progress.settings[key] ? "checked" : ""}></label>`).join("")}</section>`;
+  }
+
+  function renderCompiler() {
+    content.innerHTML = `<header class="page-header"><div><div class="eyebrow">${icon("binary")} Ferramenta oficial</div><h1>Compilador e analisador Luau</h1><p class="lead">Edite, verifique tipos, execute e inspecione bytecode com o playground oficial da linguagem Luau.</p></div></header><section class="compiler-shell"><div class="compiler-toolbar"><span>${icon("shield-check")} Luau Playground oficial · WebAssembly no navegador</span><a class="button" href="https://play.luau.org/" target="_blank" rel="noopener noreferrer">Abrir em nova aba ${icon("external-link")}</a></div><iframe src="https://play.luau.org/?embed=true&theme=dark" title="Luau Playground oficial" loading="lazy" allow="clipboard-write"></iframe></section><p class="compiler-note">O ambiente Luau aberto não contém automaticamente APIs do Roblox Studio como <code>game</code>, <code>Players</code> ou <code>DataStoreService</code>. Use-o para linguagem, tipos, lint e bytecode.</p>`;
+  }
+
+  function renderCommunity() {
+    content.innerHTML = `<header class="page-header"><div><div class="eyebrow">${icon("users-round")} Comunidade Neon</div><h1>Aprender com segurança</h1><p class="lead">Amizades, grupos e vídeo estão arquitetados como recursos moderados, não como um chat aberto.</p></div></header><section class="community-gate"><div>${icon("shield-alert")}<div><strong>Controles de segurança em construção</strong><p>O lançamento depende de idade, consentimento quando aplicável, denúncia, bloqueio, moderação, retenção mínima e resposta a incidentes.</p></div></div><span>Não disponível</span></section><div class="community-capabilities">${[["user-round-plus","Amizades","Pedidos mútuos, bloqueio e privacidade por padrão."],["users","Grupos seguros","Papéis, convites, logs de moderação e denúncia."],["image","Imagens","Análise de conteúdo, limites e remoção auditável."],["video","Vídeo-chamadas","WebRTC com sala consentida e controles imediatos."],["radio-tower","Transmissões","Moderação, atraso, denúncia e encerramento administrativo."],["gift","Presentes","Ledger auditável; nunca transferir energia sem confirmação."]].map(([iconName,title,description]) => `<article class="locked-capability">${icon(iconName)}<h2>${title}</h2><p>${description}</p><span>${icon("lock-keyhole")} Bloqueado por segurança</span></article>`).join("")}</div>`;
+  }
+
+  function setupSpoilers() {
+    if (!progress.settings.spoilerMode) return;
+    content.querySelectorAll(".code-panel pre").forEach((codeBlock) => {
+      codeBlock.classList.add("spoiler-code");
+      codeBlock.dataset.spoilerCode = "";
+      codeBlock.tabIndex = 0;
+      codeBlock.setAttribute("role", "button");
+      codeBlock.setAttribute("aria-label", "Código protegido. Clique para revelar ou ocultar.");
+    });
+  }
+
+  async function loadCommerceState() {
+    if (window.location.protocol === "file:") return;
+    try {
+      const [catalogResponse, accountResponse] = await Promise.all([
+        fetch("/api/commerce/catalog", { credentials: "same-origin", cache: "no-store" }),
+        fetch("/api/commerce/account", { credentials: "same-origin", cache: "no-store" }),
+      ]);
+      if (catalogResponse.ok) {
+        const catalogPayload = await catalogResponse.json();
+        commerceCatalog = catalogPayload.products || [];
+        checkoutAvailable = catalogPayload.checkoutAvailable === true;
+      }
+      if (accountResponse.ok) {
+        const accountPayload = await accountResponse.json();
+        commerceAccount = {
+          available: accountPayload.available === true,
+          purchasedEnergy: Number(accountPayload.purchasedEnergy) || 0,
+          plusActive: accountPayload.plusActive === true,
+        };
+      }
+      updateProgressUI();
+      if (currentRoute().startsWith("store")) render();
+    } catch (_error) {
+      commerceAccount = { available: false, purchasedEnergy: 0, plusActive: false };
+    }
   }
 
   function renderAdmin() {
@@ -3995,12 +4376,25 @@ local scenarios = {
       renderOverview();
     } else if (route === "journey") {
       renderJourney();
+    } else if (route === "areas") {
+      renderAreas();
+    } else if (route.startsWith("areas/session/")) {
+      const [, , areaId, systemId] = route.split("/");
+      renderAreaSession(areaId, systemId);
     } else if (route === "tracks") {
       renderTracks();
     } else if (route === "lab" || route.startsWith("lab/")) {
       renderLab(route.split("/")[1]);
     } else if (route === "tutor") {
       renderTutor();
+    } else if (route === "compiler") {
+      renderCompiler();
+    } else if (route === "store" || route.startsWith("store/")) {
+      renderStore(route === "store/success");
+    } else if (route === "community") {
+      renderCommunity();
+    } else if (route === "settings") {
+      renderSettings();
     } else if (route === "admin") {
       renderAdmin();
     } else if (route === "roadmap") {
@@ -4029,6 +4423,7 @@ local scenarios = {
     window.scrollTo({ top: 0, behavior: "auto" });
     setupScrollReveals();
     setupAdvancedAnimations();
+    setupSpoilers();
     closeSidebar();
 
     if (route.startsWith("system/")) {
@@ -4243,6 +4638,7 @@ local scenarios = {
       document.getElementById("admin-nav").hidden = !user.isAdmin;
       refreshIcons();
       await hydrateLearningProfile();
+      await loadCommerceState();
     } catch (_error) {
       // The guide can still run behind another static development server.
     }
@@ -4525,6 +4921,122 @@ local scenarios = {
       return;
     }
 
+    const startSessionTarget = event.target.closest("[data-start-session]");
+    if (startSessionTarget) {
+      const [areaId, systemId] = startSessionTarget.dataset.startSession.split(":");
+      if (beginAreaSession(areaId, systemId)) routeTo(`areas/session/${areaId}/${systemId}`);
+      return;
+    }
+
+    const lockedSessionTarget = event.target.closest("[data-locked-session]");
+    if (lockedSessionTarget) {
+      showToast(lockedSessionTarget.dataset.lockedSession);
+      return;
+    }
+
+    const answerTarget = event.target.closest("[data-answer-index]");
+    if (answerTarget) {
+      answerAreaQuestion(Number(answerTarget.dataset.answerIndex), answerTarget);
+      return;
+    }
+
+    if (event.target.closest("[data-next-question]")) {
+      if (!activeQuiz) return;
+      if (activeQuiz.index >= 4) {
+        finishAreaSession();
+      } else {
+        activeQuiz.index += 1;
+        activeQuiz.answered = false;
+        activeQuiz.selected = "";
+        renderAreaSession(activeQuiz.areaId, activeQuiz.systemId);
+      }
+      return;
+    }
+
+    if (event.target.closest("[data-quit-session]")) {
+      activeQuiz = null;
+      routeTo("areas");
+      return;
+    }
+
+    const retryTarget = event.target.closest("[data-retry-session]");
+    if (retryTarget) {
+      const [areaId, systemId] = retryTarget.dataset.retrySession.split(":");
+      beginAreaSession(areaId, systemId);
+      renderAreaSession(areaId, systemId);
+      return;
+    }
+
+    const spoilerTarget = event.target.closest("[data-spoiler-code]");
+    if (spoilerTarget) {
+      spoilerTarget.classList.toggle("revealed");
+      spoilerTarget.setAttribute("aria-pressed", String(spoilerTarget.classList.contains("revealed")));
+      return;
+    }
+
+    const buyTarget = event.target.closest("[data-buy-product]");
+    if (buyTarget) {
+      buyTarget.disabled = true;
+      buyTarget.textContent = "Abrindo checkout...";
+      fetch("/api/commerce/checkout", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productId: buyTarget.dataset.buyProduct }),
+      }).then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok || !payload.checkoutUrl) throw new Error(payload.error || "CheckoutUnavailable");
+        window.location.assign(payload.checkoutUrl);
+      }).catch(() => {
+        showToast("Checkout ainda não está configurado no servidor.");
+        render();
+      });
+      return;
+    }
+
+    const billingTarget = event.target.closest("[data-manage-billing]");
+    if (billingTarget) {
+      billingTarget.disabled = true;
+      fetch("/api/commerce/portal", { method: "POST", credentials: "same-origin" })
+        .then(async (response) => {
+          const payload = await response.json();
+          if (!response.ok || !payload.portalUrl) throw new Error(payload.error || "BillingPortalUnavailable");
+          window.location.assign(payload.portalUrl);
+        })
+        .catch(() => {
+          showToast("O portal de assinatura ainda não está disponível.");
+          render();
+        });
+      return;
+    }
+
+    if (event.target.closest("[data-rebirth-open]")) {
+      const dialog = document.getElementById("rebirth-dialog");
+      document.getElementById("rebirth-understood").checked = false;
+      document.getElementById("rebirth-confirm").disabled = true;
+      dialog.showModal();
+      refreshIcons();
+      return;
+    }
+
+    if (event.target.closest("#rebirth-confirm")) {
+      const completedKeys = Object.keys(progress.game.completedSessions).sort();
+      const removedKeys = completedKeys.filter((_key, index) => index % 2 === 1);
+      for (const key of removedKeys) {
+        delete progress.game.completedSessions[key];
+        const systemId = key.split(":")[1];
+        if (systemId) progress.systems[systemId] = false;
+      }
+      progress.game.xp = Math.floor(progress.game.xp * 0.5);
+      progress.game.prestige = Math.min(3, progress.game.prestige + 1);
+      progress.game.earnedEnergy += 20 * getRewardMultiplier();
+      saveProgress();
+      render();
+      window.NeonEffects?.burst(document.querySelector(".game-level-orb"), "level");
+      showToast(`Renascimento ${progress.game.prestige}: recompensas agora valem ${getRewardMultiplier()}x.`);
+      return;
+    }
+
     const favoriteTarget = event.target.closest("[data-favorite]");
     if (favoriteTarget) {
       const systemId = favoriteTarget.dataset.favorite;
@@ -4675,6 +5187,19 @@ local scenarios = {
   });
 
   document.addEventListener("change", (event) => {
+    const settingKey = event.target.dataset.setting;
+    if (settingKey && Object.hasOwn(progress.settings, settingKey)) {
+      progress.settings[settingKey] = event.target.checked;
+      saveProgress();
+      applyVisualSettings();
+      return;
+    }
+
+    if (event.target.id === "rebirth-understood") {
+      document.getElementById("rebirth-confirm").disabled = !event.target.checked;
+      return;
+    }
+
     const systemId = event.target.dataset.systemComplete;
     if (systemId) {
       progress.systems[systemId] = event.target.checked;
@@ -4773,7 +5298,7 @@ local scenarios = {
       const question = String(formData.get("question") || "").trim();
       if (!question) return;
       progress.tutorMessages.push({ role: "user", text: question }, { role: "assistant", text: tutorReply(question) });
-      progress.tutorMessages = progress.tutorMessages.slice(-20);
+      progress.tutorMessages = progress.tutorMessages.slice(commerceAccount.plusActive ? -40 : -16);
       saveProgress();
       render();
       return;
@@ -4815,6 +5340,13 @@ local scenarios = {
   });
 
   document.addEventListener("keydown", (event) => {
+    const spoilerTarget = event.target.closest?.("[data-spoiler-code]");
+    if (spoilerTarget && (event.key === "Enter" || event.key === " ")) {
+      event.preventDefault();
+      spoilerTarget.classList.toggle("revealed");
+      spoilerTarget.setAttribute("aria-pressed", String(spoilerTarget.classList.contains("revealed")));
+      return;
+    }
     if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "k") {
       event.preventDefault();
       searchInput.focus();
@@ -4855,6 +5387,7 @@ local scenarios = {
   const storedTheme = localStorage.getItem(THEME_KEY);
   const preferredTheme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   applyTheme(storedTheme || preferredTheme);
+  applyVisualSettings();
   initializeAuthControls();
   startAmbientPointer();
   renderSystemNav();
