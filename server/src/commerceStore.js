@@ -337,7 +337,8 @@ export function createCommerceStore(databaseUrl, options = {}) {
           INSERT INTO academy_commerce_events (stripe_event_id, event_type)
           VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING stripe_event_id
         `, [event.id, event.type]);
-        if (eventInsert.rowCount === 0) {
+        const duplicateEvent = eventInsert.rowCount === 0;
+        if (duplicateEvent && !CHECKOUT_EVENTS.has(event.type)) {
           await client.query("ROLLBACK");
           return { processed: false, reason: "duplicate" };
         }
@@ -525,7 +526,9 @@ export function createCommerceStore(databaseUrl, options = {}) {
         }
 
         await client.query("COMMIT");
-        return { processed: true };
+        return duplicateEvent
+          ? { processed: false, reason: "duplicate" }
+          : { processed: true };
       } catch (error) {
         await client.query("ROLLBACK");
         throw error;
