@@ -4,7 +4,7 @@ export const COMMERCE_CATALOG = Object.freeze([
     type: "subscription",
     name: "Neon Academy Plus",
     description: "Energia infinita, histórico ampliado do tutor e personalização Plus.",
-    amountCents: 9990,
+    amountCents: 12990,
     currency: "brl",
     interval: "month",
   },

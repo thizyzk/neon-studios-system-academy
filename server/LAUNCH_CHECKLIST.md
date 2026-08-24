@@ -42,7 +42,7 @@ No Stripe Dashboard, mantenha o modo de teste ativo e crie:
 
 | Produto | Tipo | Valor | Variável no Render |
 | --- | --- | ---: | --- |
-| Neon Academy Plus | Recorrente mensal | R$ 99,90 | `STRIPE_PRICE_PLUS_MONTHLY` |
+| Neon Academy Plus | Recorrente mensal | R$ 129,90 | `STRIPE_PRICE_PLUS_MONTHLY` |
 | 50 Cubic Energy | Uma vez | R$ 14,99 | `STRIPE_PRICE_ENERGY_50` |
 | 150 Cubic Energy | Uma vez | R$ 39,90 | `STRIPE_PRICE_ENERGY_150` |
 | 500 Cubic Energy | Uma vez | R$ 59,90 | `STRIPE_PRICE_ENERGY_500` |

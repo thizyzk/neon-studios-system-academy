@@ -38,7 +38,9 @@ const commerceStore = createCommerceStore(config.databaseUrl);
 const adminStore = createAdminStore(config.databaseUrl, config.adminEmails);
 const tutorAudioStore = createTutorAudioStore(config.databaseUrl);
 const r2AudioStorage = createR2AudioStorage(config);
-const stripe = config.stripeSecretKey ? new Stripe(config.stripeSecretKey) : null;
+const stripe = config.stripeSecretKey
+  ? new Stripe(config.stripeSecretKey, { timeout: 12_000, maxNetworkRetries: 1 })
+  : null;
 const tokenStore = createTokenStore({
   databaseUrl: config.databaseUrl,
   filePath: config.tokenStorePath,
@@ -138,6 +140,21 @@ async function validateConfiguredStripePrice(product) {
   const valid = stripePriceMatchesProduct(product, price);
   stripePriceCache.set(priceId, { checkedAt: Date.now(), valid });
   return valid;
+}
+
+async function getStripeCustomerWithoutBlockingCheckout(user, timeoutMs = 2500) {
+  const lookup = commerceStore.getStripeCustomerId(user).then(
+    (customerId) => ({ customerId, error: null }),
+    (error) => ({ customerId: null, error })
+  );
+  let timeoutId;
+  const timeout = new Promise((resolve) => {
+    timeoutId = setTimeout(() => resolve({ customerId: null, error: null, timedOut: true }), timeoutMs);
+  });
+  const result = await Promise.race([lookup, timeout]);
+  clearTimeout(timeoutId);
+  if (result.error) throw result.error;
+  return result;
 }
 
 function getAuthConfigurationStatus() {
@@ -1066,6 +1083,7 @@ async function handleCommerceSession(request, response, requestUrl) {
 }
 
 async function handleCommerceCheckout(request, response) {
+  const checkoutStartedAt = Date.now();
   const session = await requireAuthSession(request, response);
   if (!session) return;
   if (!isTrustedRequestOrigin(request)) {
@@ -1089,10 +1107,12 @@ async function handleCommerceCheckout(request, response) {
     sendJson(response, 429, { ok: false, error: "CheckoutRateLimit", retryAfterSeconds: rate.retryAfterSeconds });
     return;
   }
+  const priceStartedAt = Date.now();
   if (!await validateConfiguredStripePrice(product)) {
     sendJson(response, 503, { ok: false, error: "StripePriceMismatch" });
     return;
   }
+  const priceDurationMs = Date.now() - priceStartedAt;
 
   const metadata = {
     user_sub: session.user.sub,
@@ -1100,7 +1120,10 @@ async function handleCommerceCheckout(request, response) {
     product_type: product.type,
     energy: String(product.energy ?? 0),
   };
-  const stripeCustomerId = await commerceStore.getStripeCustomerId(session.user);
+  const customerStartedAt = Date.now();
+  const customerLookup = await getStripeCustomerWithoutBlockingCheckout(session.user);
+  const stripeCustomerId = customerLookup.customerId;
+  const customerDurationMs = Date.now() - customerStartedAt;
   const requestId = typeof body.requestId === "string" && /^[a-zA-Z0-9_-]{8,80}$/.test(body.requestId)
     ? body.requestId
     : crypto.randomUUID();
@@ -1122,6 +1145,18 @@ async function handleCommerceCheckout(request, response) {
     success_url: `${config.publicBaseUrl}/?checkout=success&session_id={CHECKOUT_SESSION_ID}#store/success`,
     cancel_url: `${config.publicBaseUrl}/#store`,
   }, { idempotencyKey });
+  response.setHeader(
+    "Server-Timing",
+    `price;dur=${priceDurationMs}, customer;dur=${customerDurationMs}, total;dur=${Date.now() - checkoutStartedAt}`
+  );
+  console.log(JSON.stringify({
+    event: "stripe_checkout_created",
+    productId: product.id,
+    priceDurationMs,
+    customerDurationMs,
+    customerLookupTimedOut: customerLookup.timedOut === true,
+    durationMs: Date.now() - checkoutStartedAt,
+  }));
   sendJson(response, 200, { ok: true, checkoutUrl: checkout.url });
 }
 

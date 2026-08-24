@@ -4394,7 +4394,7 @@ local scenarios = {
       <header class="page-header"><div><div class="eyebrow">${icon("gem")} Neon Academy</div><h1>Plus e Cubic Energy</h1><p class="lead">Expanda sua rotina de estudo sem misturar compras com o progresso pedagógico.</p></div></header>
       ${success ? `<div class="purchase-return ${checkoutReturn.confirmed ? "confirmed" : "pending"}">${icon(checkoutReturn.confirmed ? "badge-check" : "loader-circle")}<div><strong>${checkoutReturn.confirmed ? "Pagamento confirmado pelo Stripe" : "Aguardando confirmação assinada"}</strong><span>${checkoutReturn.confirmed ? "A compra é válida. O benefício será refletido assim que o webhook terminar o processamento." : "Não feche esta página. A validação pode levar alguns segundos."}</span></div></div>` : ""}
       ${!checkoutAvailable ? `<section class="store-availability">${icon("construction")}<div><strong>Loja em configuração</strong><p>Compras permanecem bloqueadas até banco, Price IDs e webhook Stripe estarem validados no servidor.</p></div></section>` : ""}
-      <section class="plus-offer"><div class="plus-mark">${icon("infinity")}</div><div><span>Assinatura mensal</span><h2>Neon Academy Plus</h2><p>Energia infinita, histórico maior do tutor e personalização completa da Academy.</p><ul><li>${icon("check")} Energia infinita nas Áreas</li><li>${icon("check")} Conversas maiores com o tutor</li><li>${icon("palette")} Temas Plus, fundos locais e busca Pexels quando configurada</li></ul></div><div class="plus-price"><span>${commerceAccount.plusActive ? "Plano ativo" : "Por mês"}</span><strong>${plus ? formatBRL(plus.amountCents) : "R$ 99,90"}</strong><button class="button primary" type="button" data-buy-product="plus-monthly" ${!checkoutAvailable || commerceAccount.plusActive ? "disabled" : ""}>${commerceAccount.plusActive ? "Plus ativo" : checkoutAvailable ? "Assinar Plus" : "Checkout em configuração"}</button></div></section>
+      <section class="plus-offer"><div class="plus-mark">${icon("infinity")}</div><div><span>Assinatura mensal</span><h2>Neon Academy Plus</h2><p>Energia infinita, histórico maior do tutor e personalização completa da Academy.</p><ul><li>${icon("check")} Energia infinita nas Áreas</li><li>${icon("check")} Conversas maiores com o tutor</li><li>${icon("palette")} Temas Plus, fundos locais e busca Pexels quando configurada</li></ul></div><div class="plus-price"><span>${commerceAccount.plusActive ? "Plano ativo" : "Por mês"}</span><strong>${plus ? formatBRL(plus.amountCents) : "R$ 129,90"}</strong><button class="button primary" type="button" data-buy-product="plus-monthly" ${!checkoutAvailable || commerceAccount.plusActive ? "disabled" : ""}>${commerceAccount.plusActive ? "Plus ativo" : checkoutAvailable ? "Assinar Plus" : "Checkout em configuração"}</button></div></section>
       <section class="content-section"><div class="section-heading"><div><div class="eyebrow">Pacotes avulsos</div><h2>Cubic Energy</h2></div><p>Energia comprada nunca é removida por Renascimento.</p></div><div class="energy-store-grid">${energyProducts.length ? energyProducts.map((product) => `<article class="energy-product"><div>${icon("box")}<span>${product.energy}</span></div><h3>Cubic Energy</h3>${product.compareAtCents ? `<del>${formatBRL(product.compareAtCents)}</del>` : ""}<strong>${formatBRL(product.amountCents)}</strong><button class="button" type="button" data-buy-product="${product.id}" ${checkoutAvailable ? "" : "disabled"}>${checkoutAvailable ? "Comprar" : "Indisponível"}</button></article>`).join("") : '<div class="empty-state">Carregando catálogo seguro...</div>'}</div></section>
       <section class="content-section commerce-history"><div class="section-heading"><div><div class="eyebrow">Transparência</div><h2>Extrato de Cubic Energy</h2></div><p>Créditos e débitos confirmados pelo servidor.</p></div><div class="ledger-list">${commerceLedger.length ? commerceLedger.map((entry) => `<article><span class="ledger-delta ${entry.delta >= 0 ? "positive" : "negative"}">${entry.delta >= 0 ? "+" : ""}${Number(entry.delta).toLocaleString("pt-BR")}</span><div><strong>${escapeHtml(sourceLabels[entry.source] || entry.source.replace(/^admin_adjustment:.*/, "Ajuste administrativo"))}</strong><small>${new Date(entry.createdAt).toLocaleString("pt-BR")}</small></div></article>`).join("") : '<div class="empty-state">Nenhuma movimentação de energia comprada.</div>'}</div></section>
       <section class="store-disclosure">${icon("shield-check")}<p>Preços e saldo são validados no servidor. Nenhum crédito é concedido antes do webhook. ${promotionVerified ? "Os preços anteriores foram marcados como verificados pelo operador." : "Preços riscados permanecem ocultos até existir comprovação da oferta."} Ao continuar, você aceita os <a href="/terms" target="_blank" rel="noopener">Termos de Uso</a> e a <a href="/privacy" target="_blank" rel="noopener">Política de Privacidade</a>.</p></section>`;
@@ -5493,11 +5493,12 @@ local scenarios = {
 
     const buyTarget = event.target.closest("[data-buy-product]");
     if (buyTarget) {
-      buyTarget.disabled = true;
+      content.querySelectorAll("[data-buy-product]").forEach((button) => { button.disabled = true; });
       buyTarget.textContent = "Abrindo checkout...";
       fetch("/api/commerce/checkout", {
         method: "POST",
         credentials: "same-origin",
+        signal: AbortSignal.timeout(20_000),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           productId: buyTarget.dataset.buyProduct,
@@ -5512,8 +5513,9 @@ local scenarios = {
           StripePriceMismatch: "O preço no Stripe não corresponde ao catálogo da Academy.",
           CheckoutRateLimit: "Muitas tentativas de checkout. Aguarde alguns minutos.",
           CheckoutUnavailable: "Checkout ainda não está configurado no servidor.",
+          TimeoutError: "O banco ou o Stripe demorou demais. Aguarde alguns segundos e tente novamente.",
         };
-        showToast(messages[error.message] || "Não foi possível abrir o checkout agora.");
+        showToast(messages[error.name] || messages[error.message] || "Não foi possível abrir o checkout agora.");
         render();
       });
       return;
