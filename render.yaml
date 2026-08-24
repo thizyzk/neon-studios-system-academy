@@ -3,6 +3,7 @@ services:
     name: neon-studios-system-academy
     runtime: node
     plan: free
+    region: virginia
     rootDir: server
     buildCommand: npm install
     startCommand: npm start
