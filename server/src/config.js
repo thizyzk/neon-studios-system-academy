@@ -1,6 +1,10 @@
 import path from "node:path";
 import process from "node:process";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+const serverRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const projectRoot = path.resolve(serverRoot, "..");
 
 function loadDotEnv() {
   const envPath = path.resolve(process.cwd(), ".env");
@@ -45,10 +49,10 @@ export function readConfig() {
 
   return {
     port: Number.parseInt(process.env.PORT ?? "3000", 10),
-    deploymentRevision: (process.env.RENDER_GIT_COMMIT?.trim() || "local").slice(0, 12),
+    deploymentRevision: (process.env.DEPLOYMENT_REVISION?.trim() || process.env.RENDER_GIT_COMMIT?.trim() || "local").slice(0, 12),
     publicBaseUrl,
-    siteRoot: process.env.SITE_ROOT ?? path.resolve(process.cwd(), "..", "docs", "economy-systems-guide"),
-    sourceRoot: process.env.SOURCE_ROOT ?? path.resolve(process.cwd(), "..", "src"),
+    siteRoot: process.env.SITE_ROOT?.trim() || path.resolve(projectRoot, "docs", "economy-systems-guide"),
+    sourceRoot: process.env.SOURCE_ROOT?.trim() || path.resolve(projectRoot, "src"),
     googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
     googleAllowedEmailDomain: (process.env.GOOGLE_ALLOWED_EMAIL_DOMAIN ?? "").trim().toLowerCase(),
     adminEmails: (process.env.ADMIN_EMAILS ?? "").split(",").map((value) => value.trim().toLowerCase()).filter(Boolean),
@@ -96,7 +100,7 @@ export function readConfig() {
     tiktokScopes: process.env.TIKTOK_SCOPES ?? "user.info.basic,video.list",
     robloxSharedSecret: process.env.ROBLOX_SHARED_SECRET ?? "",
     reelsCacheTtlMs: Number.parseInt(process.env.REELS_CACHE_TTL_SECONDS ?? "43200", 10) * 1000,
-    tokenStorePath: process.env.TIKTOK_TOKEN_STORE_PATH?.trim() || path.resolve(process.cwd(), ".data", "tiktok-session.json"),
+    tokenStorePath: process.env.TIKTOK_TOKEN_STORE_PATH?.trim() || path.resolve(serverRoot, ".data", "tiktok-session.json"),
     stateCookieName: "tiktok_oauth_state",
     tiktokApiBaseUrl: "https://open.tiktokapis.com",
     tiktokAuthorizeUrl: "https://www.tiktok.com/v2/auth/authorize/",

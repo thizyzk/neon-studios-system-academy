@@ -1,0 +1,14 @@
+{
+  "name": "neon-studios-system-academy",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "postinstall": "npm --prefix server ci --omit=dev",
+    "start": "npm --prefix server start",
+    "check": "npm --prefix server run check",
+    "test": "npm --prefix server test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
