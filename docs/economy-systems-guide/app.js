@@ -2738,6 +2738,13 @@ local scenarios = {
   let commerceAccount = { available: false, purchasedEnergy: 0, plusActive: false };
   let commerceCatalog = [];
   let checkoutAvailable = false;
+  let tutorAudioConfig = { available: false, maxBytes: 0, maxDurationMs: 0, maxDaily: 0, retentionDays: 0 };
+  let tutorAudioRecorder = null;
+  let tutorAudioStream = null;
+  let tutorAudioChunks = [];
+  let tutorAudioStartedAt = 0;
+  let tutorAudioStopTimer = null;
+  let discardTutorAudio = false;
 
   const content = document.getElementById("content");
   const sidebar = document.getElementById("sidebar");
@@ -4037,12 +4044,21 @@ local scenarios = {
     return `${matched.label} existe para ${matched.role.toLocaleLowerCase("pt-BR")} Pense primeiro nesta pergunta: ${matched.question}`;
   }
 
+  function renderTutorMessage(message) {
+    const role = message.role === "user" ? "user" : "assistant";
+    const audioId = typeof message.audioId === "string" ? message.audioId : "";
+    const audio = audioId ? `<div class="tutor-audio" data-audio-container="${escapeHtml(audioId)}"><button class="button audio-load-button" type="button" data-load-audio="${escapeHtml(audioId)}">${icon("play")} Ouvir áudio</button><button class="icon-button danger-button" type="button" data-delete-audio="${escapeHtml(audioId)}" aria-label="Excluir áudio" title="Excluir áudio">${icon("trash-2")}</button><small>${Math.max(1, Math.round((Number(message.durationMs) || 0) / 1000))}s</small></div>` : "";
+    const copy = message.text ? `<p>${escapeHtml(message.text)}</p>` : "";
+    const speak = role === "assistant" && message.text ? `<button class="icon-button" type="button" data-speak="${escapeHtml(message.text)}" aria-label="Ouvir resposta" title="Ouvir resposta">${icon("volume-2")}</button>` : "";
+    return `<article class="${role}"><span>${role === "user" ? "Você" : "Tutor"}</span>${copy}${audio}${speak}</article>`;
+  }
+
   function renderTutor() {
     const context = getSystem(progress.lastRoute.split("/")[1]) || getRecommendedSystem();
     const messages = Array.isArray(progress.tutorMessages) ? progress.tutorMessages.slice(commerceAccount.plusActive ? -20 : -8) : [];
     content.innerHTML = `
       <header class="page-header"><div><div class="eyebrow">${icon("messages-square")} Tutor contextual</div><h1>Converse com a Academy</h1><p class="lead">Pergunte sobre arquitetura, métodos, etapas e riscos usando o conteúdo técnico desta biblioteca.</p></div></header>
-      <section class="tutor-shell"><aside><span>Contexto atual</span><strong>${context?.label || "Visão geral"}</strong><p>${context?.role || "Escolha uma aula para aprofundar a conversa."}</p><div class="tutor-suggestions">${["Como começar?", "Qual o maior risco?", "Explique a API", "Como testar?"].map((text) => `<button type="button" data-tutor-suggestion="${text}">${text}</button>`).join("")}</div></aside><div class="tutor-chat"><div class="tutor-messages" aria-live="polite">${messages.length ? messages.map((message) => `<article class="${message.role}"><span>${message.role === "user" ? "Você" : "Tutor"}</span><p>${escapeHtml(message.text)}</p>${message.role === "assistant" ? `<button class="icon-button" type="button" data-speak="${escapeHtml(message.text)}" aria-label="Ouvir resposta" title="Ouvir resposta">${icon("volume-2")}</button>` : ""}</article>`).join("") : `<article class="assistant"><span>Tutor</span><p>Estou usando ${context?.label || "a biblioteca"} como contexto. O que você quer entender primeiro?</p></article>`}</div><form class="tutor-form" data-tutor-form><button class="icon-button" type="button" data-voice-input aria-label="Perguntar por voz" title="Perguntar por voz">${icon("mic")}</button><label class="sr-only" for="tutor-question">Pergunta</label><input id="tutor-question" name="question" placeholder="Pergunte como pensar, implementar ou testar..." autocomplete="off" required><button class="button primary" type="submit">Enviar ${icon("send")}</button></form><small>Este tutor consulta o conteúdo local da Academy. Ele não envia seu código para um serviço externo.</small></div></section>`;
+      <section class="tutor-shell"><aside><span>Contexto atual</span><strong>${context?.label || "Visão geral"}</strong><p>${context?.role || "Escolha uma aula para aprofundar a conversa."}</p><div class="tutor-suggestions">${["Como começar?", "Qual o maior risco?", "Explique a API", "Como testar?"].map((text) => `<button type="button" data-tutor-suggestion="${text}">${text}</button>`).join("")}</div></aside><div class="tutor-chat"><div class="tutor-messages" aria-live="polite">${messages.length ? messages.map(renderTutorMessage).join("") : `<article class="assistant"><span>Tutor</span><p>Estou usando ${context?.label || "a biblioteca"} como contexto. O que você quer entender primeiro?</p></article>`}</div><form class="tutor-form" data-tutor-form><button class="icon-button" type="button" data-voice-input aria-label="Ditado por voz" title="Converter voz em texto">${icon("mic")}</button><button class="icon-button audio-record-button" type="button" data-audio-record aria-label="Gravar mensagem de áudio" title="Gravar mensagem de áudio" ${tutorAudioConfig.available ? "" : "disabled"}>${icon("audio-lines")}</button><label class="sr-only" for="tutor-question">Pergunta</label><input id="tutor-question" name="question" placeholder="Pergunte como pensar, implementar ou testar..." autocomplete="off" required><button class="button primary" type="submit">Enviar ${icon("send")}</button></form><small id="tutor-audio-status">${tutorAudioConfig.available ? `Áudios ficam no bucket privado por ${tutorAudioConfig.retentionDays} dias. Textos e metadados sincronizam pelo PostgreSQL.` : "Gravação em nuvem ficará disponível após configurar PostgreSQL e Cloudflare R2."}</small></div></section>`;
   }
 
   function academyAreas() {
@@ -4333,9 +4349,10 @@ local scenarios = {
   async function loadCommerceState() {
     if (window.location.protocol === "file:") return;
     try {
-      const [catalogResponse, accountResponse] = await Promise.all([
+      const [catalogResponse, accountResponse, audioResponse] = await Promise.all([
         fetch("/api/commerce/catalog", { credentials: "same-origin", cache: "no-store" }),
         fetch("/api/commerce/account", { credentials: "same-origin", cache: "no-store" }),
+        fetch("/api/tutor/audio/config", { credentials: "same-origin", cache: "no-store" }),
       ]);
       if (catalogResponse.ok) {
         const catalogPayload = await catalogResponse.json();
@@ -4350,10 +4367,22 @@ local scenarios = {
           plusActive: accountPayload.plusActive === true,
         };
       }
+      if (audioResponse.ok) {
+        const audioPayload = await audioResponse.json();
+        tutorAudioConfig = {
+          available: audioPayload.available === true,
+          maxBytes: Number(audioPayload.maxBytes) || 0,
+          maxDurationMs: Number(audioPayload.maxDurationMs) || 0,
+          maxDaily: Number(audioPayload.maxDaily) || 0,
+          retentionDays: Number(audioPayload.retentionDays) || 0,
+        };
+      }
       updateProgressUI();
       if (currentRoute().startsWith("store")) render();
+      if (currentRoute() === "tutor") render();
     } catch (_error) {
       commerceAccount = { available: false, purchasedEnergy: 0, plusActive: false };
+      tutorAudioConfig.available = false;
     }
   }
 
@@ -4372,6 +4401,9 @@ local scenarios = {
 
   function render() {
     const route = currentRoute();
+    if (route !== "tutor" && tutorAudioRecorder?.state === "recording") {
+      stopTutorAudioRecording(true);
+    }
     if (route === "overview") {
       renderOverview();
     } else if (route === "journey") {
@@ -4902,6 +4934,133 @@ local scenarios = {
     showToast("Registro removido.");
   }
 
+  function setTutorAudioStatus(message) {
+    const status = document.getElementById("tutor-audio-status");
+    if (status) status.textContent = message;
+  }
+
+  function stopTutorAudioTracks() {
+    tutorAudioStream?.getTracks().forEach((track) => track.stop());
+    tutorAudioStream = null;
+  }
+
+  async function uploadTutorAudio(blob, durationMs) {
+    let pendingAudioId = "";
+    try {
+      if (blob.size > tutorAudioConfig.maxBytes) throw new Error("AudioTooLarge");
+      setTutorAudioStatus("Preparando envio seguro...");
+      const requestResponse = await fetch("/api/tutor/audio/upload-url", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contentType: blob.type, sizeBytes: blob.size, durationMs }),
+      });
+      const requestPayload = await requestResponse.json();
+      if (!requestResponse.ok || !requestPayload.uploadUrl) {
+        if (requestResponse.status === 429) throw new Error("DailyAudioLimit");
+        if (requestResponse.status === 413) throw new Error("AudioTooLarge");
+        throw new Error(requestPayload.error || "UploadUrlUnavailable");
+      }
+      pendingAudioId = requestPayload.audioId;
+      setTutorAudioStatus("Enviando áudio por conexão segura para o bucket privado...");
+      const uploadResponse = await fetch(requestPayload.uploadUrl, {
+        method: "PUT",
+        mode: "cors",
+        headers: { "Content-Type": requestPayload.contentType },
+        body: blob,
+      });
+      if (!uploadResponse.ok) throw new Error("R2UploadRejected");
+      const finalizeResponse = await fetch("/api/tutor/audio/finalize", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audioId: pendingAudioId }),
+      });
+      const finalizePayload = await finalizeResponse.json();
+      if (!finalizeResponse.ok || !finalizePayload.audio) throw new Error(finalizePayload.error || "AudioFinalizeRejected");
+      progress.tutorMessages.push(
+        { role: "user", text: "", audioId: pendingAudioId, durationMs },
+        { role: "assistant", text: "Áudio armazenado com segurança. A transcrição automática ainda não está conectada." }
+      );
+      progress.tutorMessages = progress.tutorMessages.slice(commerceAccount.plusActive ? -40 : -16);
+      saveProgress();
+      render();
+      showToast("Mensagem de áudio enviada.");
+    } catch (error) {
+      if (pendingAudioId) {
+        fetch(`/api/tutor/audio/${encodeURIComponent(pendingAudioId)}`, {
+          method: "DELETE",
+          credentials: "same-origin",
+        }).catch(() => {});
+      }
+      const messages = {
+        AudioTooLarge: "O áudio ultrapassou o limite desta conta.",
+        DailyAudioLimit: "Você atingiu o limite diário de mensagens de áudio.",
+        R2UploadRejected: "O bucket recusou o envio. Confira o CORS do R2.",
+      };
+      setTutorAudioStatus(messages[error.message] || "Não foi possível armazenar este áudio.");
+      showToast(messages[error.message] || "Falha ao enviar áudio.");
+    }
+  }
+
+  function stopTutorAudioRecording(discard = false) {
+    if (!tutorAudioRecorder || tutorAudioRecorder.state === "inactive") return;
+    discardTutorAudio = discard;
+    tutorAudioRecorder.stop();
+  }
+
+  async function startTutorAudioRecording(button) {
+    if (tutorAudioRecorder?.state === "recording") {
+      stopTutorAudioRecording(false);
+      return;
+    }
+    if (!tutorAudioConfig.available || !navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      showToast("Gravação de áudio não está disponível neste navegador.");
+      return;
+    }
+    try {
+      tutorAudioStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+      const preferredTypes = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4"];
+      const mimeType = preferredTypes.find((type) => MediaRecorder.isTypeSupported?.(type)) || "";
+      tutorAudioRecorder = mimeType
+        ? new MediaRecorder(tutorAudioStream, { mimeType, audioBitsPerSecond: 32_000 })
+        : new MediaRecorder(tutorAudioStream, { audioBitsPerSecond: 32_000 });
+      tutorAudioChunks = [];
+      tutorAudioStartedAt = performance.now();
+      discardTutorAudio = false;
+      tutorAudioRecorder.addEventListener("dataavailable", (event) => {
+        if (event.data.size > 0) tutorAudioChunks.push(event.data);
+      });
+      tutorAudioRecorder.addEventListener("stop", () => {
+        const durationMs = Math.min(tutorAudioConfig.maxDurationMs, Math.max(250, Math.round(performance.now() - tutorAudioStartedAt)));
+        const recordedType = tutorAudioRecorder?.mimeType || mimeType || "audio/webm";
+        const chunks = tutorAudioChunks;
+        const discarded = discardTutorAudio;
+        clearTimeout(tutorAudioStopTimer);
+        tutorAudioStopTimer = null;
+        tutorAudioRecorder = null;
+        tutorAudioChunks = [];
+        stopTutorAudioTracks();
+        if (discarded || chunks.length === 0) return;
+        uploadTutorAudio(new Blob(chunks, { type: recordedType }), durationMs);
+      }, { once: true });
+      tutorAudioRecorder.start(250);
+      button.classList.add("recording");
+      button.innerHTML = icon("square");
+      button.setAttribute("aria-label", "Parar gravação");
+      button.title = "Parar gravação";
+      setTutorAudioStatus(`Gravando. Limite de ${Math.round(tutorAudioConfig.maxDurationMs / 1000)} segundos.`);
+      tutorAudioStopTimer = setTimeout(() => stopTutorAudioRecording(false), tutorAudioConfig.maxDurationMs);
+      refreshIcons();
+    } catch (_error) {
+      stopTutorAudioTracks();
+      showToast("Permita o acesso ao microfone para gravar.");
+      setTutorAudioStatus("O navegador não liberou o microfone.");
+    }
+  }
+
   function applyTheme(theme) {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem(THEME_KEY, theme);
@@ -5141,6 +5300,59 @@ local scenarios = {
       recognition.onerror = () => showToast("Não consegui ouvir. Confira a permissão do microfone.");
       recognition.start();
       showToast("Ouvindo sua pergunta...");
+      return;
+    }
+
+    const audioRecordTarget = event.target.closest("[data-audio-record]");
+    if (audioRecordTarget) {
+      startTutorAudioRecording(audioRecordTarget);
+      return;
+    }
+
+    const audioLoadTarget = event.target.closest("[data-load-audio]");
+    if (audioLoadTarget) {
+      const audioId = audioLoadTarget.dataset.loadAudio;
+      audioLoadTarget.disabled = true;
+      audioLoadTarget.textContent = "Carregando...";
+      fetch(`/api/tutor/audio/${encodeURIComponent(audioId)}/url`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      }).then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok || !payload.audioUrl) throw new Error("AudioUnavailable");
+        const container = audioLoadTarget.closest("[data-audio-container]");
+        const player = document.createElement("audio");
+        player.controls = true;
+        player.preload = "metadata";
+        player.src = payload.audioUrl;
+        container.replaceChildren(player);
+        await player.play().catch(() => {});
+      }).catch(() => {
+        showToast("Este áudio expirou ou não está disponível.");
+        audioLoadTarget.disabled = false;
+        audioLoadTarget.innerHTML = `${icon("play")} Tentar novamente`;
+        refreshIcons();
+      });
+      return;
+    }
+
+    const audioDeleteTarget = event.target.closest("[data-delete-audio]");
+    if (audioDeleteTarget) {
+      const audioId = audioDeleteTarget.dataset.deleteAudio;
+      audioDeleteTarget.disabled = true;
+      fetch(`/api/tutor/audio/${encodeURIComponent(audioId)}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+      }).then(async (response) => {
+        if (!response.ok) throw new Error("AudioDeleteRejected");
+        progress.tutorMessages = progress.tutorMessages.filter((message) => message.audioId !== audioId);
+        saveProgress();
+        render();
+        showToast("Áudio excluído.");
+      }).catch(() => {
+        audioDeleteTarget.disabled = false;
+        showToast("Não foi possível excluir este áudio.");
+      });
       return;
     }
 

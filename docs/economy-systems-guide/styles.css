@@ -4269,11 +4269,44 @@ pre code {
 
 .tutor-form {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) auto;
+  grid-template-columns: 40px 40px minmax(0, 1fr) auto;
   gap: 8px;
   margin-top: 14px;
   padding-top: 14px;
   border-top: 1px solid var(--line);
+}
+
+.audio-record-button.recording {
+  border-color: var(--coral);
+  background: var(--coral-soft);
+  color: var(--coral);
+  animation: tutor-recording-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes tutor-recording-pulse {
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--coral) 14%, transparent); }
+}
+
+.tutor-audio {
+  display: grid;
+  grid-template-columns: minmax(130px, auto) 34px auto;
+  gap: 7px;
+  align-items: center;
+  margin-top: 9px;
+}
+
+.tutor-audio .audio-load-button {
+  min-width: 0;
+}
+
+.tutor-audio small {
+  color: var(--muted);
+}
+
+.tutor-audio audio {
+  grid-column: 1 / -1;
+  width: min(360px, 100%);
+  height: 38px;
 }
 
 .tutor-form input {
@@ -4364,7 +4397,7 @@ pre code {
   }
 
   .tutor-form {
-    grid-template-columns: 40px minmax(0, 1fr);
+    grid-template-columns: 40px 40px minmax(0, 1fr);
   }
 
   .tutor-form .button {

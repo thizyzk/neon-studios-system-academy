@@ -37,3 +37,17 @@ services:
         value: "0.5"
       - key: RECAPTCHA_ALLOWED_HOSTNAMES
         value: neon-studios-system-academy.onrender.com
+      - key: DATABASE_URL
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        value: neon-academy-audio
+      - key: R2_SIGNED_URL_TTL_SECONDS
+        value: "300"
+      - key: R2_AUDIO_RETENTION_DAYS
+        value: "30"

@@ -4,6 +4,8 @@ Servidor Node.js da Academy: Google Identity, reCAPTCHA, progresso opcional em P
 
 Para configurar monetizacao e entender por que os recursos sociais continuam bloqueados, leia [MONETIZATION_AND_COMMUNITY.md](./MONETIZATION_AND_COMMUNITY.md).
 
+Para configurar mensagens de voz privadas, leia [CLOUDFLARE_R2_SETUP.md](./CLOUDFLARE_R2_SETUP.md).
+
 ## Execucao local
 
 1. Copie `.env.example` para `.env` e preencha somente os valores usados.

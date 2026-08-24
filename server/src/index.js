@@ -11,8 +11,10 @@ import { COMMERCE_CATALOG, findCommerceProduct } from "./commerceCatalog.js";
 import { createCommerceStore } from "./commerceStore.js";
 import { readConfig } from "./config.js";
 import { createLearningStore } from "./learningStore.js";
+import { createR2AudioStorage, validateAudioUpload } from "./r2AudioStorage.js";
 import { createSignedSession, verifySignedSession } from "./signedSession.js";
 import { exchangeAuthorizationCode, getUserInfo, listVideos, queryVideos, refreshAccessToken } from "./tiktokClient.js";
+import { createTutorAudioStore } from "./tutorAudioStore.js";
 import { readTokenStore, withTokenTimestamps, writeTokenStore } from "./tokenStore.js";
 
 const config = readConfig();
@@ -21,11 +23,14 @@ const TOKEN_REFRESH_SKEW_MS = 10 * 60 * 1000;
 const MAX_AUTH_BODY_BYTES = 20 * 1024;
 const MAX_LEARNING_PROFILE_BODY_BYTES = 600 * 1024;
 const MAX_COMMERCE_BODY_BYTES = 64 * 1024;
+const MAX_AUDIO_METADATA_BODY_BYTES = 16 * 1024;
 const authRateLimitWindowMs = config.authRateLimitWindowSeconds * 1000;
 const googleClient = config.googleClientId ? new OAuth2Client(config.googleClientId) : null;
 const authAttempts = new Map();
 const learningStore = createLearningStore(config.databaseUrl);
 const commerceStore = createCommerceStore(config.databaseUrl);
+const tutorAudioStore = createTutorAudioStore(config.databaseUrl);
+const r2AudioStorage = createR2AudioStorage(config);
 const stripe = config.stripeSecretKey ? new Stripe(config.stripeSecretKey) : null;
 
 const contentTypes = new Map([
@@ -49,12 +54,14 @@ let reelCache = {
 };
 
 function applySecurityHeaders(response) {
+  const r2Origin = r2AudioStorage.endpointOrigin;
   response.setHeader("Content-Security-Policy", [
     "default-src 'self'",
     "script-src 'self' https://accounts.google.com https://www.google.com https://www.gstatic.com",
     "style-src 'self' 'unsafe-inline' https://accounts.google.com",
     "frame-src https://accounts.google.com https://www.google.com https://recaptcha.google.com https://play.luau.org",
-    "connect-src 'self' https://accounts.google.com https://www.google.com",
+    `connect-src 'self' https://accounts.google.com https://www.google.com${r2Origin ? ` ${r2Origin}` : ""}`,
+    `media-src 'self' blob:${r2Origin ? ` ${r2Origin}` : ""}`,
     "img-src 'self' data: https://lh3.googleusercontent.com https://*.googleusercontent.com",
     "font-src 'self' data:",
     "object-src 'none'",
@@ -936,6 +943,144 @@ async function handleCommunityStatus(request, response) {
   });
 }
 
+function isTutorAudioConfigured() {
+  return Boolean(tutorAudioStore.available && r2AudioStorage.available);
+}
+
+async function getTutorAudioLimits(user) {
+  let plusActive = false;
+  if (commerceStore.available) {
+    const account = await commerceStore.getAccount(user);
+    plusActive = account?.plusActive === true;
+  }
+  return {
+    plusActive,
+    maxBytes: plusActive ? 10 * 1024 * 1024 : 3 * 1024 * 1024,
+    maxDurationMs: plusActive ? 5 * 60 * 1000 : 60 * 1000,
+    maxDaily: plusActive ? 100 : 10,
+    retentionDays: config.r2AudioRetentionDays,
+  };
+}
+
+function validAudioId(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+async function handleTutorAudioConfig(request, response) {
+  const session = await requireAuthSession(request, response);
+  if (!session) return;
+  const limits = await getTutorAudioLimits(session.user);
+  sendJson(response, 200, {
+    ok: true,
+    available: isTutorAudioConfigured(),
+    maxBytes: limits.maxBytes,
+    maxDurationMs: limits.maxDurationMs,
+    maxDaily: limits.maxDaily,
+    retentionDays: limits.retentionDays,
+  });
+}
+
+async function handleTutorAudioUploadUrl(request, response) {
+  const session = await requireAuthSession(request, response);
+  if (!session) return;
+  if (!isTrustedRequestOrigin(request)) {
+    sendJson(response, 403, { ok: false, error: "InvalidOrigin" });
+    return;
+  }
+  if (!isTutorAudioConfigured()) {
+    sendJson(response, 503, { ok: false, error: "AudioStorageUnavailable" });
+    return;
+  }
+  const limits = await getTutorAudioLimits(session.user);
+  const metadata = validateAudioUpload(await readJsonBody(request, MAX_AUDIO_METADATA_BODY_BYTES), limits);
+  const identity = r2AudioStorage.createObjectIdentity(session.user, metadata.contentType);
+  await tutorAudioStore.createPending(session.user, { ...identity, ...metadata }, limits);
+  try {
+    const uploadUrl = await r2AudioStorage.createUploadUrl(identity.objectKey, metadata.contentType);
+    sendJson(response, 200, {
+      ok: true,
+      audioId: identity.audioId,
+      uploadUrl,
+      contentType: metadata.contentType,
+      expiresIn: config.r2SignedUrlTtlSeconds,
+    });
+  } catch (error) {
+    await tutorAudioStore.remove(session.user, identity.audioId).catch(() => {});
+    throw error;
+  }
+}
+
+async function handleTutorAudioFinalize(request, response) {
+  const session = await requireAuthSession(request, response);
+  if (!session) return;
+  if (!isTrustedRequestOrigin(request)) {
+    sendJson(response, 403, { ok: false, error: "InvalidOrigin" });
+    return;
+  }
+  if (!isTutorAudioConfigured()) {
+    sendJson(response, 503, { ok: false, error: "AudioStorageUnavailable" });
+    return;
+  }
+  const body = await readJsonBody(request, MAX_AUDIO_METADATA_BODY_BYTES);
+  const audioId = String(body.audioId || "");
+  if (!validAudioId(audioId)) {
+    sendJson(response, 400, { ok: false, error: "InvalidAudioId" });
+    return;
+  }
+  const pending = await tutorAudioStore.getPending(session.user, audioId);
+  if (!pending) {
+    sendJson(response, 404, { ok: false, error: "PendingAudioNotFound" });
+    return;
+  }
+  try {
+    const uploaded = await r2AudioStorage.headObject(pending.objectKey);
+    const audio = await tutorAudioStore.finalize(session.user, audioId, uploaded);
+    sendJson(response, 200, { ok: true, audio });
+  } catch (error) {
+    await r2AudioStorage.deleteObject(pending.objectKey).catch(() => {});
+    await tutorAudioStore.remove(session.user, audioId).catch(() => {});
+    throw error;
+  }
+}
+
+async function handleTutorAudioReadUrl(request, response, audioId) {
+  const session = await requireAuthSession(request, response);
+  if (!session) return;
+  if (!isTutorAudioConfigured() || !validAudioId(audioId)) {
+    sendJson(response, 404, { ok: false, error: "AudioNotFound" });
+    return;
+  }
+  const audio = await tutorAudioStore.get(session.user, audioId);
+  if (!audio) {
+    sendJson(response, 404, { ok: false, error: "AudioNotFound" });
+    return;
+  }
+  const audioUrl = await r2AudioStorage.createReadUrl(audio.objectKey);
+  sendJson(response, 200, { ok: true, audioUrl, expiresIn: config.r2SignedUrlTtlSeconds });
+}
+
+async function handleTutorAudioDelete(request, response, audioId) {
+  const session = await requireAuthSession(request, response);
+  if (!session) return;
+  if (!isTrustedRequestOrigin(request)) {
+    sendJson(response, 403, { ok: false, error: "InvalidOrigin" });
+    return;
+  }
+  if (!isTutorAudioConfigured() || !validAudioId(audioId)) {
+    sendJson(response, 404, { ok: false, error: "AudioNotFound" });
+    return;
+  }
+  const audio = await tutorAudioStore.get(session.user, audioId)
+    || await tutorAudioStore.getPending(session.user, audioId);
+  if (!audio) {
+    sendJson(response, 404, { ok: false, error: "AudioNotFound" });
+    return;
+  }
+  await r2AudioStorage.deleteObject(audio.objectKey);
+  await tutorAudioStore.remove(session.user, audioId);
+  sendJson(response, 200, { ok: true });
+}
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -955,6 +1100,7 @@ async function route(request, response) {
       authConfigured: isAuthConfigured(),
       learningSyncConfigured: learningStore.available,
       commerceConfigured: Boolean(stripe && commerceStore.available && config.stripeWebhookSecret),
+      audioStorageConfigured: isTutorAudioConfigured(),
       communityEnabled: config.communityEnabled,
     });
     return;
@@ -1022,6 +1168,33 @@ async function route(request, response) {
 
   if (request.method === "GET" && requestUrl.pathname === "/api/community/status") {
     await handleCommunityStatus(request, response);
+    return;
+  }
+
+  if (request.method === "GET" && requestUrl.pathname === "/api/tutor/audio/config") {
+    await handleTutorAudioConfig(request, response);
+    return;
+  }
+
+  if (request.method === "POST" && requestUrl.pathname === "/api/tutor/audio/upload-url") {
+    await handleTutorAudioUploadUrl(request, response);
+    return;
+  }
+
+  if (request.method === "POST" && requestUrl.pathname === "/api/tutor/audio/finalize") {
+    await handleTutorAudioFinalize(request, response);
+    return;
+  }
+
+  const tutorAudioReadMatch = requestUrl.pathname.match(/^\/api\/tutor\/audio\/([^/]+)\/url$/);
+  if (request.method === "GET" && tutorAudioReadMatch) {
+    await handleTutorAudioReadUrl(request, response, tutorAudioReadMatch[1]);
+    return;
+  }
+
+  const tutorAudioDeleteMatch = requestUrl.pathname.match(/^\/api\/tutor\/audio\/([^/]+)$/);
+  if (request.method === "DELETE" && tutorAudioDeleteMatch) {
+    await handleTutorAudioDelete(request, response, tutorAudioDeleteMatch[1]);
     return;
   }
 
@@ -1104,10 +1277,11 @@ const server = http.createServer((request, response) => {
   applySecurityHeaders(response);
   route(request, response).catch((error) => {
     console.error(error);
-    sendJson(response, 500, {
+    const statusCode = Number.isInteger(error.statusCode) ? error.statusCode : 500;
+    sendJson(response, statusCode, {
       ok: false,
-      error: "InternalServerError",
-      message: error.message,
+      error: statusCode >= 500 ? "InternalServerError" : "RequestRejected",
+      ...(statusCode < 500 ? { message: error.message } : {}),
     });
   });
 });
