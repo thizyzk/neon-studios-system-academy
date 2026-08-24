@@ -5511,8 +5511,14 @@ local scenarios = {
       }).catch((error) => {
         const messages = {
           StripePriceMismatch: "O preço no Stripe não corresponde ao catálogo da Academy.",
+          StripeTermsUrlMissing: "Cadastre a URL dos Termos de Uso nas configurações públicas do Stripe.",
+          StripeResourceMissing: "O Price ID configurado não existe neste modo do Stripe.",
+          StripeUnavailable: "O Stripe está temporariamente indisponível. Tente novamente em instantes.",
+          CheckoutProviderRejected: "O Stripe recusou a criação do checkout. Verifique as configurações do produto.",
           CheckoutRateLimit: "Muitas tentativas de checkout. Aguarde alguns minutos.",
           CheckoutUnavailable: "Checkout ainda não está configurado no servidor.",
+          Unauthorized: "Sua sessão expirou. Recarregue a página e entre novamente.",
+          InvalidOrigin: "Este endereço não está autorizado a iniciar pagamentos.",
           TimeoutError: "O banco ou o Stripe demorou demais. Aguarde alguns segundos e tente novamente.",
         };
         showToast(messages[error.name] || messages[error.message] || "Não foi possível abrir o checkout agora.");

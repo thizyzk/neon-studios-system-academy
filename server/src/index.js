@@ -157,6 +157,30 @@ async function getStripeCustomerWithoutBlockingCheckout(user, timeoutMs = 2500) 
   return result;
 }
 
+function classifyStripeCheckoutError(error) {
+  const message = String(error?.message || "");
+  const parameter = String(error?.param || "");
+  if (/terms of service/i.test(message) || /terms_of_service/i.test(parameter)) return "StripeTermsUrlMissing";
+  if (error?.code === "resource_missing") return "StripeResourceMissing";
+  if (["StripeConnectionError", "StripeAPIError", "StripeRateLimitError"].includes(error?.type)) {
+    return "StripeUnavailable";
+  }
+  return "CheckoutProviderRejected";
+}
+
+function logCheckoutFailure(error, phase, productId, startedAt) {
+  console.error(JSON.stringify({
+    event: "stripe_checkout_failed",
+    phase,
+    productId,
+    type: error?.type || "",
+    code: error?.code || "",
+    parameter: error?.param || "",
+    message: error?.message || "",
+    durationMs: Date.now() - startedAt,
+  }));
+}
+
 function getAuthConfigurationStatus() {
   const missing = [];
   if (!config.googleClientId) missing.push("GOOGLE_CLIENT_ID");
@@ -1108,7 +1132,15 @@ async function handleCommerceCheckout(request, response) {
     return;
   }
   const priceStartedAt = Date.now();
-  if (!await validateConfiguredStripePrice(product)) {
+  let validPrice = false;
+  try {
+    validPrice = await validateConfiguredStripePrice(product);
+  } catch (error) {
+    logCheckoutFailure(error, "price_lookup", product.id, checkoutStartedAt);
+    sendJson(response, 502, { ok: false, error: classifyStripeCheckoutError(error) });
+    return;
+  }
+  if (!validPrice) {
     sendJson(response, 503, { ok: false, error: "StripePriceMismatch" });
     return;
   }
@@ -1131,20 +1163,27 @@ async function handleCommerceCheckout(request, response) {
     .update(`${session.user.sub}:${product.id}:${requestId}`)
     .digest("hex");
 
-  const checkout = await stripe.checkout.sessions.create({
-    mode: product.type === "subscription" ? "subscription" : "payment",
-    ...(stripeCustomerId ? { customer: stripeCustomerId } : { customer_email: session.user.email }),
-    client_reference_id: session.user.sub,
-    line_items: [{ quantity: 1, price: config.stripePriceIds[product.id] }],
-    metadata,
-    ...(product.type === "subscription" ? { subscription_data: { metadata } } : {}),
-    ...(product.type === "energy" ? { payment_intent_data: { metadata } } : {}),
-    consent_collection: { terms_of_service: "required" },
-    allow_promotion_codes: config.stripeAllowPromotionCodes,
-    automatic_tax: { enabled: config.stripeAutomaticTax },
-    success_url: `${config.publicBaseUrl}/?checkout=success&session_id={CHECKOUT_SESSION_ID}#store/success`,
-    cancel_url: `${config.publicBaseUrl}/#store`,
-  }, { idempotencyKey });
+  let checkout;
+  try {
+    checkout = await stripe.checkout.sessions.create({
+      mode: product.type === "subscription" ? "subscription" : "payment",
+      ...(stripeCustomerId ? { customer: stripeCustomerId } : { customer_email: session.user.email }),
+      client_reference_id: session.user.sub,
+      line_items: [{ quantity: 1, price: config.stripePriceIds[product.id] }],
+      metadata,
+      ...(product.type === "subscription" ? { subscription_data: { metadata } } : {}),
+      ...(product.type === "energy" ? { payment_intent_data: { metadata } } : {}),
+      consent_collection: { terms_of_service: "required" },
+      allow_promotion_codes: config.stripeAllowPromotionCodes,
+      automatic_tax: { enabled: config.stripeAutomaticTax },
+      success_url: `${config.publicBaseUrl}/?checkout=success&session_id={CHECKOUT_SESSION_ID}#store/success`,
+      cancel_url: `${config.publicBaseUrl}/#store`,
+    }, { idempotencyKey });
+  } catch (error) {
+    logCheckoutFailure(error, "session_create", product.id, checkoutStartedAt);
+    sendJson(response, 502, { ok: false, error: classifyStripeCheckoutError(error) });
+    return;
+  }
   response.setHeader(
     "Server-Timing",
     `price;dur=${priceDurationMs}, customer;dur=${customerDurationMs}, total;dur=${Date.now() - checkoutStartedAt}`
