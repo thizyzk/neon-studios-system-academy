@@ -2786,7 +2786,7 @@ local scenarios = {
   let currentUser = null;
   let adminState = { status: "idle", users: [], total: 0, permissions: {}, events: [], readiness: null, error: "", query: "" };
   let activeQuiz = null;
-  let commerceAccount = { available: false, purchasedEnergy: 0, plusActive: false };
+  let commerceAccount = { available: false, purchasedEnergy: 0, energyDebt: 0, plusActive: false };
   let commerceCatalog = [];
   let commerceLedger = [];
   let checkoutAvailable = false;
@@ -4381,7 +4381,15 @@ local scenarios = {
     const plus = commerceCatalog.find((product) => product.type === "subscription");
     const energyProducts = commerceCatalog.filter((product) => product.type === "energy");
     const recentStripeCredit = commerceLedger.find((entry) => entry.source === "stripe_checkout" && Date.now() - new Date(entry.createdAt).getTime() < 30 * 60 * 1000);
-    const sourceLabels = { stripe_checkout: "Compra Stripe", "charge.refunded": "Reembolso", "charge.dispute.created": "Contestação" };
+    const sourceLabels = {
+      stripe_checkout: "Compra Stripe",
+      "charge.refunded": "Reembolso",
+      "refund.created": "Reembolso",
+      "refund.updated": "Atualização de reembolso",
+      "refund.failed": "Reembolso revertido",
+      "charge.dispute.created": "Contestação",
+      "charge.dispute.closed": "Contestação encerrada",
+    };
     content.innerHTML = `
       <header class="page-header"><div><div class="eyebrow">${icon("gem")} Neon Academy</div><h1>Plus e Cubic Energy</h1><p class="lead">Expanda sua rotina de estudo sem misturar compras com o progresso pedagógico.</p></div></header>
       ${success ? `<div class="purchase-return ${checkoutReturn.confirmed ? "confirmed" : "pending"}">${icon(checkoutReturn.confirmed ? "badge-check" : "loader-circle")}<div><strong>${checkoutReturn.confirmed ? "Pagamento confirmado pelo Stripe" : "Aguardando confirmação assinada"}</strong><span>${checkoutReturn.confirmed ? "A compra é válida. O benefício será refletido assim que o webhook terminar o processamento." : "Não feche esta página. A validação pode levar alguns segundos."}</span></div></div>` : ""}
@@ -4390,6 +4398,9 @@ local scenarios = {
       <section class="content-section"><div class="section-heading"><div><div class="eyebrow">Pacotes avulsos</div><h2>Cubic Energy</h2></div><p>Energia comprada nunca é removida por Renascimento.</p></div><div class="energy-store-grid">${energyProducts.length ? energyProducts.map((product) => `<article class="energy-product"><div>${icon("box")}<span>${product.energy}</span></div><h3>Cubic Energy</h3>${product.compareAtCents ? `<del>${formatBRL(product.compareAtCents)}</del>` : ""}<strong>${formatBRL(product.amountCents)}</strong><button class="button" type="button" data-buy-product="${product.id}" ${checkoutAvailable ? "" : "disabled"}>${checkoutAvailable ? "Comprar" : "Indisponível"}</button></article>`).join("") : '<div class="empty-state">Carregando catálogo seguro...</div>'}</div></section>
       <section class="content-section commerce-history"><div class="section-heading"><div><div class="eyebrow">Transparência</div><h2>Extrato de Cubic Energy</h2></div><p>Créditos e débitos confirmados pelo servidor.</p></div><div class="ledger-list">${commerceLedger.length ? commerceLedger.map((entry) => `<article><span class="ledger-delta ${entry.delta >= 0 ? "positive" : "negative"}">${entry.delta >= 0 ? "+" : ""}${Number(entry.delta).toLocaleString("pt-BR")}</span><div><strong>${escapeHtml(sourceLabels[entry.source] || entry.source.replace(/^admin_adjustment:.*/, "Ajuste administrativo"))}</strong><small>${new Date(entry.createdAt).toLocaleString("pt-BR")}</small></div></article>`).join("") : '<div class="empty-state">Nenhuma movimentação de energia comprada.</div>'}</div></section>
       <section class="store-disclosure">${icon("shield-check")}<p>Preços e saldo são validados no servidor. Nenhum crédito é concedido antes do webhook. ${promotionVerified ? "Os preços anteriores foram marcados como verificados pelo operador." : "Preços riscados permanecem ocultos até existir comprovação da oferta."} Ao continuar, você aceita os <a href="/terms" target="_blank" rel="noopener">Termos de Uso</a> e a <a href="/privacy" target="_blank" rel="noopener">Política de Privacidade</a>.</p></section>`;
+    if (commerceAccount.energyDebt > 0) {
+      content.insertAdjacentHTML("afterbegin", `<section class="store-availability">${icon("shield-alert")}<div><strong>Energia em reconciliação</strong><p>${commerceAccount.energyDebt.toLocaleString("pt-BR")} unidade(s) serão compensadas em compras futuras por causa de reembolso ou contestação.</p></div></section>`);
+    }
     if (commerceAccount.plusActive) {
       const plusAction = content.querySelector('[data-buy-product="plus-monthly"]');
       plusAction.disabled = false;
@@ -4482,6 +4493,7 @@ local scenarios = {
         commerceAccount = {
           available: accountPayload.available === true,
           purchasedEnergy: Number(accountPayload.purchasedEnergy) || 0,
+          energyDebt: Number(accountPayload.energyDebt) || 0,
           plusActive: accountPayload.plusActive === true,
         };
       }
@@ -4517,7 +4529,7 @@ local scenarios = {
         setTimeout(() => loadCommerceState(), 2500);
       }
     } catch (_error) {
-      commerceAccount = { available: false, purchasedEnergy: 0, plusActive: false };
+      commerceAccount = { available: false, purchasedEnergy: 0, energyDebt: 0, plusActive: false };
       commerceLedger = [];
       tutorAudioConfig.available = false;
       window.NeonThemeStudio?.enforceEntitlement(false);

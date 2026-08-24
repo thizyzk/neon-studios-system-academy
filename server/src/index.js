@@ -966,7 +966,7 @@ async function handleCommerceAccount(request, response) {
   const session = await requireAuthSession(request, response);
   if (!session) return;
   if (!commerceStore.available) {
-    sendJson(response, 200, { ok: true, available: false, purchasedEnergy: 0, plusActive: false });
+    sendJson(response, 200, { ok: true, available: false, purchasedEnergy: 0, energyDebt: 0, plusActive: false });
     return;
   }
   const account = await commerceStore.getAccount(session.user);
@@ -1110,6 +1110,39 @@ async function handleCommerceEnergyConsume(request, response) {
   sendJson(response, result.ok ? 200 : 409, result);
 }
 
+async function enrichStripeCommerceEvent(event) {
+  const object = event.data.object;
+  const needsChargeLookup = [
+    "charge.dispute.created",
+    "charge.dispute.closed",
+    "refund.created",
+    "refund.updated",
+    "refund.failed",
+  ].includes(event.type);
+  const relatedCharge = event.type === "charge.refunded"
+    ? object
+    : needsChargeLookup && object.charge
+      ? await stripe.charges.retrieve(typeof object.charge === "string" ? object.charge : object.charge.id)
+      : null;
+  if (!relatedCharge) return event;
+
+  event.commerceRelatedCharge = relatedCharge;
+  const invoiceId = typeof relatedCharge.invoice === "string"
+    ? relatedCharge.invoice
+    : relatedCharge.invoice?.id;
+  if (!invoiceId) return event;
+
+  const invoice = await stripe.invoices.retrieve(invoiceId);
+  const subscriptionId = typeof invoice.parent?.subscription_details?.subscription === "string"
+    ? invoice.parent.subscription_details.subscription
+    : invoice.parent?.subscription_details?.subscription?.id
+      || (typeof invoice.subscription === "string" ? invoice.subscription : invoice.subscription?.id);
+  if (!subscriptionId) return event;
+  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+  event.commerceSubscriptionActive = ["active", "trialing"].includes(subscription.status);
+  return event;
+}
+
 async function handleStripeWebhook(request, response) {
   if (!stripe || !commerceStore.available || !config.stripeWebhookSecret) {
     sendJson(response, 503, { ok: false, error: "WebhookUnavailable" });
@@ -1128,6 +1161,7 @@ async function handleStripeWebhook(request, response) {
     sendJson(response, 400, { ok: false, error: "InvalidStripeSignature" });
     return;
   }
+  event = await enrichStripeCommerceEvent(event);
   const result = await commerceStore.processStripeEvent(event);
   sendJson(response, 200, { ok: true, received: true, processed: result.processed });
 }

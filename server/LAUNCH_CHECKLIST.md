@@ -75,7 +75,11 @@ customer.subscription.deleted
 invoice.paid
 invoice.payment_failed
 charge.refunded
+refund.created
+refund.updated
+refund.failed
 charge.dispute.created
+charge.dispute.closed
 ```
 
 Copie `whsec_...` para `STRIPE_WEBHOOK_SECRET`.
