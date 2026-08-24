@@ -8,6 +8,8 @@
   const googleStep = document.getElementById("google-step");
   const googleButton = document.getElementById("google-button");
   const accountPolicy = document.getElementById("account-policy");
+  const AUTH_HANDOFF_KEY = "neon-academy-auth-handoff-v1";
+  const AUTH_REQUEST_TIMEOUT_MS = 20000;
 
   try {
     const visualSettings = JSON.parse(localStorage.getItem("neon-academy-visual-settings-v1") || "{}");
@@ -23,6 +25,30 @@
   let activeConfig = null;
   let googleInitialized = false;
   let busy = false;
+  let retryTimer = null;
+
+  async function fetchWithTimeout(url, options = {}, timeoutMs = AUTH_REQUEST_TIMEOUT_MS) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  async function readJsonResponse(response) {
+    const text = await response.text();
+    if (!text) return {};
+    try {
+      return JSON.parse(text);
+    } catch {
+      const error = new Error("Authentication server returned an invalid response.");
+      error.name = "InvalidServerResponse";
+      error.status = response.status;
+      throw error;
+    }
+  }
 
   function refreshIcons() {
     window.lucide?.createIcons({ attrs: { "stroke-width": 1.8 } });
@@ -84,12 +110,22 @@
     setStatus(statusMessage, "success");
   }
 
-  function resetCaptcha(message) {
+  function resetCaptcha(message, retryAfterSeconds = 0) {
+    clearTimeout(retryTimer);
     if (activeConfig?.recaptchaVersion === "v3") {
       captchaToken = "";
-      renderGoogleButton(activeConfig, message);
-      statusElement.classList.remove("success");
-      statusElement.classList.add("error");
+      const waitSeconds = Math.max(0, Math.ceil(Number(retryAfterSeconds) || 0));
+      if (waitSeconds > 0) {
+        lockGoogleStep(`Aguarde ${waitSeconds}s para tentar novamente`);
+        setStatus(message, "error");
+        retryTimer = setTimeout(() => {
+          renderGoogleButton(activeConfig, "Pode tentar novamente com sua conta Google.");
+        }, waitSeconds * 1000);
+      } else {
+        renderGoogleButton(activeConfig, message);
+        statusElement.classList.remove("success");
+        statusElement.classList.add("error");
+      }
       return;
     }
 
@@ -113,16 +149,17 @@
         throw new Error("CAPTCHA token unavailable.");
       }
 
-      const authResponse = await fetch("/api/auth/google", {
+      const authResponse = await fetchWithTimeout("/api/auth/google", {
         method: "POST",
         credentials: "same-origin",
+        cache: "no-store",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           credential: response.credential,
           captchaToken: token,
         }),
       });
-      const payload = await authResponse.json();
+      const payload = await readJsonResponse(authResponse);
 
       if (!authResponse.ok || !payload.ok) {
         const messages = {
@@ -132,22 +169,42 @@
           InvalidOrigin: "O domínio atual não está autorizado.",
           AccountSuspended: "Esta conta está temporariamente suspensa.",
           AuthStorageUnavailable: "O banco de autenticação está indisponível. Tente novamente em instantes.",
+          InvalidAuthRequest: "A solicitação de login ficou inválida. Selecione a conta novamente.",
         };
         const captchaMessages = {
           CaptchaHostnameMismatch: "Este endereço não está autorizado na configuração do reCAPTCHA.",
-          CaptchaScoreTooLow: "A verificação automática recusou esta tentativa. Aguarde um momento e tente novamente.",
+          CaptchaScoreTooLow: "O reCAPTCHA considerou esta tentativa incomum. Aguarde alguns segundos e tente novamente.",
           CaptchaActionMismatch: "A ação configurada no reCAPTCHA não corresponde ao login.",
           CaptchaRejected: "O Google recusou o token do reCAPTCHA. Confira a chave e os domínios autorizados.",
           CaptchaVerificationUnavailable: "O serviço de verificação do reCAPTCHA está temporariamente indisponível.",
         };
-        resetCaptcha(captchaMessages[payload.captchaReason] ?? messages[payload.error] ?? "Não foi possível concluir o login.");
+        resetCaptcha(
+          captchaMessages[payload.captchaReason] ?? messages[payload.error] ?? "Não foi possível concluir o login.",
+          payload.retryAfterSeconds
+        );
         return;
       }
 
+      try {
+        sessionStorage.setItem(AUTH_HANDOFF_KEY, JSON.stringify({
+          createdAt: Date.now(),
+          user: payload.user,
+        }));
+      } catch {
+        // The signed cookie remains authoritative when session storage is blocked.
+      }
       setStatus(`Bem-vindo, ${payload.user.givenName || payload.user.name}. Abrindo a Academy...`, "success");
       window.location.replace("/");
-    } catch (_error) {
-      resetCaptcha("O servidor de autenticação não respondeu. Tente novamente.");
+    } catch (error) {
+      const timedOut = error?.name === "AbortError";
+      const invalidResponse = error?.name === "InvalidServerResponse";
+      resetCaptcha(
+        timedOut
+          ? "A validação demorou demais porque o servidor ou o banco estava acordando. Tente novamente."
+          : invalidResponse
+            ? "O servidor respondeu de forma incompleta. Tente novamente em alguns segundos."
+            : "A conexão com o servidor de autenticação foi interrompida. Tente novamente."
+      );
     } finally {
       busy = false;
     }
@@ -157,7 +214,10 @@
     refreshIcons();
 
     try {
-      const sessionResponse = await fetch("/api/auth/session", { credentials: "same-origin" });
+      const sessionResponse = await fetchWithTimeout("/api/auth/session", {
+        credentials: "same-origin",
+        cache: "no-store",
+      }, 12000);
       if (sessionResponse.ok) {
         window.location.replace("/");
         return;

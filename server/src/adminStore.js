@@ -12,6 +12,25 @@ const PERMISSIONS = Object.freeze({
   "integrations.manage": "owner",
   "roles.manage": "owner",
 });
+const TRANSIENT_DATABASE_CODES = new Set([
+  "08000", "08001", "08003", "08006", "57P01", "57P02", "57P03",
+  "ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE",
+]);
+
+function isTransientDatabaseError(error) {
+  return TRANSIENT_DATABASE_CODES.has(error?.code)
+    || /connection|timeout|terminated|socket|closed/i.test(String(error?.message || ""));
+}
+
+async function withTransientRetry(operation) {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!isTransientDatabaseError(error)) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    return operation();
+  }
+}
 
 export function normalizeAdminRole(role) {
   return ADMIN_ROLES.includes(role) ? role : "user";
@@ -67,12 +86,18 @@ export function createAdminStore(databaseUrl, bootstrapEmails = []) {
     };
   }
 
-  const pool = new Pool({ connectionString: databaseUrl, max: 3 });
+  const pool = new Pool({
+    connectionString: databaseUrl,
+    max: 2,
+    connectionTimeoutMillis: 10000,
+    idleTimeoutMillis: 30000,
+    keepAlive: true,
+  });
   let schemaPromise = null;
 
   function ensureSchema() {
     if (!schemaPromise) {
-      schemaPromise = pool.query(`
+      schemaPromise = withTransientRetry(() => pool.query(`
         CREATE TABLE IF NOT EXISTS academy_admin_users (
           google_sub TEXT PRIMARY KEY,
           email TEXT NOT NULL,
@@ -98,7 +123,7 @@ export function createAdminStore(databaseUrl, bootstrapEmails = []) {
         );
         CREATE INDEX IF NOT EXISTS academy_admin_audit_created_idx
           ON academy_admin_audit (created_at DESC);
-      `).catch((error) => {
+      `)).catch((error) => {
         schemaPromise = null;
         throw error;
       });
@@ -109,7 +134,7 @@ export function createAdminStore(databaseUrl, bootstrapEmails = []) {
   async function ensureUser(user, login = false) {
     await ensureSchema();
     const bootstrapOwner = normalizedBootstrapEmails.includes(user.email.toLowerCase());
-    const result = await pool.query(`
+    const result = await withTransientRetry(() => pool.query(`
       INSERT INTO academy_admin_users (google_sub, email, name, role, last_login_at)
       VALUES ($1, $2, $3, $4, ${login ? "NOW()" : "NULL"})
       ON CONFLICT (google_sub) DO UPDATE SET
@@ -119,7 +144,7 @@ export function createAdminStore(databaseUrl, bootstrapEmails = []) {
         last_login_at = CASE WHEN $5 THEN NOW() ELSE academy_admin_users.last_login_at END,
         updated_at = NOW()
       RETURNING *
-    `, [user.sub, user.email.toLowerCase(), String(user.name || user.email).slice(0, 160), bootstrapOwner ? "owner" : "user", login]);
+    `, [user.sub, user.email.toLowerCase(), String(user.name || user.email).slice(0, 160), bootstrapOwner ? "owner" : "user", login]));
     return normalizeUserRow(result.rows[0], normalizedBootstrapEmails);
   }
 
@@ -132,7 +157,10 @@ export function createAdminStore(databaseUrl, bootstrapEmails = []) {
 
     async getAccessState(user) {
       await ensureSchema();
-      const result = await pool.query("SELECT * FROM academy_admin_users WHERE google_sub = $1", [user.sub]);
+      const result = await withTransientRetry(() => pool.query(
+        "SELECT * FROM academy_admin_users WHERE google_sub = $1",
+        [user.sub]
+      ));
       if (!result.rows[0]) return ensureUser(user, false);
       return normalizeUserRow(result.rows[0], normalizedBootstrapEmails);
     },

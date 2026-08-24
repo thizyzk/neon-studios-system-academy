@@ -3,6 +3,8 @@
   "name": "neon-studios-system-academy",
   "main": "server/src/worker.js",
   "compatibility_date": "2026-08-24",
+  "compatibility_flags": ["nodejs_compat"],
+  "keep_vars": true,
   "assets": {
     "directory": "./.cloudflare/assets",
     "binding": "ASSETS",
@@ -16,6 +18,7 @@
     "NODE_ENV": "production",
     "PORT": "3000",
     "TRUST_PROXY": "true",
+    "RECAPTCHA_MINIMUM_SCORE": "0.3",
     "COMMUNITY_ENABLED": "false",
     "PROMOTIONAL_PRICES_VERIFIED": "false"
   }

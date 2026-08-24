@@ -320,12 +320,17 @@ async function verifyRecaptcha(token, remoteIp) {
     body.set("remoteip", remoteIp);
   }
 
-  const verificationResponse = await fetch(config.recaptchaVerifyUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-    signal: AbortSignal.timeout(8000),
-  });
+  let verificationResponse;
+  try {
+    verificationResponse = await fetch(config.recaptchaVerifyUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch {
+    return { ok: false, reason: "CaptchaVerificationUnavailable" };
+  }
 
   if (!verificationResponse.ok) {
     return { ok: false, reason: "CaptchaVerificationUnavailable" };
@@ -726,6 +731,8 @@ function handleAuthConfig(response) {
 }
 
 async function handleGoogleAuth(request, response) {
+  const requestId = String(request.headers["cf-ray"] || crypto.randomUUID()).slice(0, 80);
+  const startedAt = Date.now();
   if (!isAuthConfigured()) {
     sendJson(response, 503, {
       ok: false,
@@ -756,15 +763,21 @@ async function handleGoogleAuth(request, response) {
     const captchaResult = await verifyRecaptcha(body.captchaToken, attempt.ip);
     if (!captchaResult.ok) {
       console.warn(
-        "Authentication CAPTCHA rejected.",
-        captchaResult.reason,
-        captchaResult.hostname ?? "",
-        Number.isFinite(captchaResult.score) ? `score=${captchaResult.score}` : ""
+        JSON.stringify({
+          event: "auth_captcha_rejected",
+          requestId,
+          reason: captchaResult.reason,
+          hostname: captchaResult.hostname ?? "",
+          score: Number.isFinite(captchaResult.score) ? captchaResult.score : null,
+          durationMs: Date.now() - startedAt,
+        })
       );
       sendJson(response, 401, {
         ok: false,
         error: "InvalidCaptcha",
         captchaReason: captchaResult.reason,
+        retryAfterSeconds: captchaResult.reason === "CaptchaScoreTooLow" ? 8 : 0,
+        requestId,
       });
       return;
     }
@@ -779,8 +792,14 @@ async function handleGoogleAuth(request, response) {
     try {
       access = await adminStore.recordLogin(user);
     } catch (error) {
-      console.error("Administration identity store is unavailable.", error.message);
-      sendJson(response, 503, { ok: false, error: "AuthStorageUnavailable" });
+      console.error(JSON.stringify({
+        event: "auth_storage_unavailable",
+        requestId,
+        code: error.code || "",
+        message: error.message,
+        durationMs: Date.now() - startedAt,
+      }));
+      sendJson(response, 503, { ok: false, error: "AuthStorageUnavailable", requestId });
       return;
     }
     if (isCurrentlyBanned(access)) {
@@ -796,18 +815,43 @@ async function handleGoogleAuth(request, response) {
     const session = createSignedSession(trustedUser, config.authSessionSecret, config.authSessionMaxAgeSeconds);
     authAttempts.delete(attempt.ip);
     response.setHeader("Set-Cookie", createAuthCookie(session.token));
-    sendJson(response, 200, { ok: true, user: trustedUser });
+    console.log(JSON.stringify({
+      event: "auth_succeeded",
+      requestId,
+      role: trustedUser.role,
+      durationMs: Date.now() - startedAt,
+    }));
+    sendJson(response, 200, { ok: true, user: trustedUser, requestId });
   } catch (error) {
-    console.warn("Google authentication failed.", error.message);
+    console.warn(JSON.stringify({
+      event: "auth_failed",
+      requestId,
+      code: error.code || "",
+      message: error.message,
+      durationMs: Date.now() - startedAt,
+    }));
     sendJson(response, error.statusCode ?? 401, {
       ok: false,
       error: error.statusCode ? "InvalidAuthRequest" : "GoogleAccountRejected",
+      requestId,
     });
   }
 }
 
 async function handleAuthSession(request, response) {
-  const session = await getValidatedAuthSession(request);
+  let session;
+  try {
+    session = await getValidatedAuthSession(request);
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "auth_session_storage_unavailable",
+      requestId: String(request.headers["cf-ray"] || crypto.randomUUID()).slice(0, 80),
+      code: error.code || "",
+      message: error.message,
+    }));
+    sendJson(response, 503, { ok: false, error: "AuthStorageUnavailable" });
+    return;
+  }
   if (!session) {
     response.setHeader("Set-Cookie", clearAuthCookie());
     sendJson(response, 401, { ok: false, authenticated: false });

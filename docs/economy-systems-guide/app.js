@@ -6,6 +6,7 @@
   const VISUAL_SETTINGS_KEY = "neon-academy-visual-settings-v1";
   const WORKSPACE_KEY = "neon-academy-workspace-v1";
   const ACTIVE_ACCOUNT_KEY = "neon-academy-active-account";
+  const AUTH_HANDOFF_KEY = "neon-academy-auth-handoff-v1";
   const learningTracks = window.NEON_ACADEMY_TRACKS || [];
   let activeAccountId = localStorage.getItem(ACTIVE_ACCOUNT_KEY) || "guest";
 
@@ -4839,52 +4840,116 @@ local scenarios = {
     }
   }
 
+  function readAuthHandoff() {
+    try {
+      const handoff = JSON.parse(sessionStorage.getItem(AUTH_HANDOFF_KEY) || "null");
+      if (!handoff?.user || Date.now() - Number(handoff.createdAt || 0) > 60_000) {
+        sessionStorage.removeItem(AUTH_HANDOFF_KEY);
+        return null;
+      }
+      return handoff.user;
+    } catch {
+      try {
+        sessionStorage.removeItem(AUTH_HANDOFF_KEY);
+      } catch {
+        // Private browsing can block session storage entirely.
+      }
+      return null;
+    }
+  }
+
+  function clearAuthHandoff() {
+    try {
+      sessionStorage.removeItem(AUTH_HANDOFF_KEY);
+    } catch {
+      // The session cookie still controls authentication.
+    }
+  }
+
+  function activateUserAccount(user) {
+    if (!user?.sub || activeAccountId === user.sub) return false;
+    activeAccountId = user.sub;
+    localStorage.setItem(ACTIVE_ACCOUNT_KEY, activeAccountId);
+    progress = loadProgress();
+    workState = loadWorkState();
+    return true;
+  }
+
+  function displayAuthUser(user, trusted = false) {
+    if (!user) return;
+    const authUser = document.getElementById("auth-user");
+    const avatar = document.getElementById("auth-user-avatar");
+    const avatarFallback = document.getElementById("auth-user-avatar-fallback");
+    document.getElementById("auth-user-name").textContent = user.name || user.email;
+    document.getElementById("auth-user-email").textContent = user.email || "";
+
+    if (user.picture) {
+      avatar.src = user.picture;
+      avatar.hidden = false;
+      avatarFallback.hidden = true;
+    } else {
+      avatar.removeAttribute("src");
+      avatar.hidden = true;
+      avatarFallback.hidden = false;
+    }
+
+    authUser.hidden = false;
+    document.getElementById("admin-nav").hidden = !(trusted && user.isAdmin);
+    refreshIcons();
+  }
+
+  async function fetchAuthSession() {
+    let lastResponse = null;
+    let lastError = null;
+    for (const delayMs of [0, 400, 1200]) {
+      if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
+      try {
+        lastResponse = await fetch("/api/auth/session", {
+          credentials: "same-origin",
+          cache: "no-store"
+        });
+        if (lastResponse.status < 500) return lastResponse;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (lastResponse) return lastResponse;
+    throw lastError || new Error("Authentication session request failed.");
+  }
+
   async function initializeAuthControls() {
-    if (window.location.protocol === "file:") return;
+    if (window.location.protocol === "file:") return true;
+
+    const handoffUser = readAuthHandoff();
+    if (handoffUser) {
+      activateUserAccount(handoffUser);
+      displayAuthUser(handoffUser, false);
+    }
 
     try {
-      const response = await fetch("/api/auth/session", {
-        credentials: "same-origin",
-        cache: "no-store"
-      });
+      const response = await fetchAuthSession();
       if (response.status === 401) {
+        clearAuthHandoff();
+        localStorage.removeItem(ACTIVE_ACCOUNT_KEY);
         window.location.replace("/login");
-        return;
+        return false;
       }
-      if (!response.ok) return;
+      if (!response.ok) {
+        if (!handoffUser) document.getElementById("auth-user").hidden = true;
+        return true;
+      }
 
       const payload = await response.json();
       const user = payload.user;
-      if (!user) return;
+      if (!user) return true;
       currentUser = user;
-
-      if (user.sub && activeAccountId !== user.sub) {
-        activeAccountId = user.sub;
-        localStorage.setItem(ACTIVE_ACCOUNT_KEY, activeAccountId);
-        progress = loadProgress();
-        workState = loadWorkState();
-        renderSystemNav();
-        render();
-      }
-
-      const authUser = document.getElementById("auth-user");
-      const avatar = document.getElementById("auth-user-avatar");
-      const avatarFallback = document.getElementById("auth-user-avatar-fallback");
-      document.getElementById("auth-user-name").textContent = user.name || user.email;
-      document.getElementById("auth-user-email").textContent = user.email;
-
-      if (user.picture) {
-        avatar.src = user.picture;
-        avatar.hidden = false;
-        avatarFallback.hidden = true;
-      }
-      authUser.hidden = false;
-      document.getElementById("admin-nav").hidden = !user.isAdmin;
-      refreshIcons();
-      await hydrateLearningProfile();
-      await loadCommerceState();
+      clearAuthHandoff();
+      activateUserAccount(user);
+      displayAuthUser(user, true);
+      return true;
     } catch (_error) {
-      // The guide can still run behind another static development server.
+      if (!handoffUser) document.getElementById("auth-user").hidden = true;
+      return true;
     }
   }
 
@@ -5903,8 +5968,15 @@ local scenarios = {
   const preferredTheme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   applyTheme(storedTheme || preferredTheme);
   applyVisualSettings();
-  initializeAuthControls();
   startAmbientPointer();
-  renderSystemNav();
-  render();
+  async function bootstrapAcademy() {
+    const canContinue = await initializeAuthControls();
+    if (!canContinue) return;
+    renderSystemNav();
+    render();
+    if (window.location.protocol !== "file:") {
+      await Promise.all([hydrateLearningProfile(), loadCommerceState()]);
+    }
+  }
+  void bootstrapAcademy();
 })();
