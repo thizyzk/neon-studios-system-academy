@@ -9,6 +9,7 @@ const PERMISSIONS = Object.freeze({
   "users.ban": "moderator",
   "energy.adjust": "administrator",
   "audit.read": "administrator",
+  "integrations.manage": "owner",
   "roles.manage": "owner",
 });
 

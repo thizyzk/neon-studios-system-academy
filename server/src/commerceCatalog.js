@@ -3,7 +3,7 @@ export const COMMERCE_CATALOG = Object.freeze([
     id: "plus-monthly",
     type: "subscription",
     name: "Neon Academy Plus",
-    description: "Energia infinita, tutor expandido e recursos sociais quando forem liberados.",
+    description: "Energia infinita, histórico ampliado do tutor e personalização Plus.",
     amountCents: 9990,
     currency: "brl",
     interval: "month",
@@ -52,4 +52,13 @@ export const COMMERCE_CATALOG = Object.freeze([
 
 export function findCommerceProduct(productId) {
   return COMMERCE_CATALOG.find((product) => product.id === productId) ?? null;
+}
+
+export function stripePriceMatchesProduct(product, price) {
+  if (!product || !price || price.active !== true) return false;
+  if (price.currency !== product.currency || price.unit_amount !== product.amountCents) return false;
+  if (product.type === "subscription") {
+    return price.type === "recurring" && price.recurring?.interval === product.interval;
+  }
+  return price.type === "one_time";
 }

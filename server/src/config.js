@@ -35,7 +35,7 @@ function loadDotEnv() {
 }
 
 export function readConfig() {
-  const publicBaseUrl = process.env.PUBLIC_BASE_URL ?? process.env.RENDER_EXTERNAL_URL ?? "http://localhost:3000";
+  const publicBaseUrl = process.env.PUBLIC_BASE_URL?.trim() || process.env.RENDER_EXTERNAL_URL?.trim() || "http://localhost:3000";
   const publicHostname = new URL(publicBaseUrl).hostname.toLowerCase();
   const configuredRecaptchaScore = Number.parseFloat(process.env.RECAPTCHA_MINIMUM_SCORE ?? "0.5");
   const configuredCaptchaHosts = (process.env.RECAPTCHA_ALLOWED_HOSTNAMES ?? "")
@@ -77,15 +77,25 @@ export function readConfig() {
     r2AudioRetentionDays: Math.min(365, Math.max(1, Number.parseInt(process.env.R2_AUDIO_RETENTION_DAYS ?? "30", 10) || 30)),
     stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? "",
     stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
+    stripePriceIds: {
+      "plus-monthly": (process.env.STRIPE_PRICE_PLUS_MONTHLY ?? "").trim(),
+      "energy-50": (process.env.STRIPE_PRICE_ENERGY_50 ?? "").trim(),
+      "energy-150": (process.env.STRIPE_PRICE_ENERGY_150 ?? "").trim(),
+      "energy-500": (process.env.STRIPE_PRICE_ENERGY_500 ?? "").trim(),
+      "energy-1000": (process.env.STRIPE_PRICE_ENERGY_1000 ?? "").trim(),
+    },
+    stripeAutomaticTax: process.env.STRIPE_AUTOMATIC_TAX === "true",
+    stripeAllowPromotionCodes: process.env.STRIPE_ALLOW_PROMOTION_CODES === "true",
+    promotionalPricesVerified: process.env.PROMOTIONAL_PRICES_VERIFIED === "true",
     pexelsApiKey: process.env.PEXELS_API_KEY ?? "",
     communityEnabled: process.env.COMMUNITY_ENABLED === "true",
     tiktokClientKey: process.env.TIKTOK_CLIENT_KEY ?? "",
     tiktokClientSecret: process.env.TIKTOK_CLIENT_SECRET ?? "",
-    tiktokRedirectUri: process.env.TIKTOK_REDIRECT_URI ?? `${process.env.PUBLIC_BASE_URL ?? "http://localhost:3000"}/auth/tiktok/callback`,
+    tiktokRedirectUri: process.env.TIKTOK_REDIRECT_URI?.trim() || `${publicBaseUrl}/auth/tiktok/callback`,
     tiktokScopes: process.env.TIKTOK_SCOPES ?? "user.info.basic,video.list",
     robloxSharedSecret: process.env.ROBLOX_SHARED_SECRET ?? "",
     reelsCacheTtlMs: Number.parseInt(process.env.REELS_CACHE_TTL_SECONDS ?? "43200", 10) * 1000,
-    tokenStorePath: process.env.TIKTOK_TOKEN_STORE_PATH ?? path.resolve(process.cwd(), ".data", "tiktok-session.json"),
+    tokenStorePath: process.env.TIKTOK_TOKEN_STORE_PATH?.trim() || path.resolve(process.cwd(), ".data", "tiktok-session.json"),
     stateCookieName: "tiktok_oauth_state",
     tiktokApiBaseUrl: "https://open.tiktokapis.com",
     tiktokAuthorizeUrl: "https://www.tiktok.com/v2/auth/authorize/",

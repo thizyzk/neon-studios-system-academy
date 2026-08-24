@@ -2783,11 +2783,14 @@ local scenarios = {
   let deferredInstallPrompt = null;
   let labFeedback = "";
   let currentUser = null;
-  let adminState = { status: "idle", users: [], total: 0, permissions: {}, events: [], error: "", query: "" };
+  let adminState = { status: "idle", users: [], total: 0, permissions: {}, events: [], readiness: null, error: "", query: "" };
   let activeQuiz = null;
   let commerceAccount = { available: false, purchasedEnergy: 0, plusActive: false };
   let commerceCatalog = [];
+  let commerceLedger = [];
   let checkoutAvailable = false;
+  let promotionVerified = false;
+  let purchaseRefreshAttempts = 0;
   let tutorAudioConfig = { available: false, maxBytes: 0, maxDurationMs: 0, maxDaily: 0, retentionDays: 0 };
   let tutorAudioRecorder = null;
   let tutorAudioStream = null;
@@ -4375,12 +4378,16 @@ local scenarios = {
   function renderStore(success = false) {
     const plus = commerceCatalog.find((product) => product.type === "subscription");
     const energyProducts = commerceCatalog.filter((product) => product.type === "energy");
+    const recentStripeCredit = commerceLedger.find((entry) => entry.source === "stripe_checkout" && Date.now() - new Date(entry.createdAt).getTime() < 30 * 60 * 1000);
+    const sourceLabels = { stripe_checkout: "Compra Stripe", "charge.refunded": "Reembolso", "charge.dispute.created": "Contestação" };
     content.innerHTML = `
       <header class="page-header"><div><div class="eyebrow">${icon("gem")} Neon Academy</div><h1>Plus e Cubic Energy</h1><p class="lead">Expanda sua rotina de estudo sem misturar compras com o progresso pedagógico.</p></div></header>
-      ${success ? `<div class="purchase-return">${icon("badge-check")}<div><strong>Pagamento recebido pelo checkout</strong><span>O saldo será atualizado após a confirmação assinada do provedor.</span></div></div>` : ""}
-      <section class="plus-offer"><div class="plus-mark">${icon("infinity")}</div><div><span>Assinatura mensal</span><h2>Neon Academy Plus</h2><p>Energia infinita, histórico maior do tutor e acesso aos recursos sociais quando forem liberados com segurança.</p><ul><li>${icon("check")} Energia infinita nas Áreas</li><li>${icon("check")} Conversas maiores com o tutor</li><li>${icon("shield-check")} Comunidade e mídia somente após os controles de segurança</li></ul></div><div class="plus-price"><span>${commerceAccount.plusActive ? "Plano ativo" : "Por mês"}</span><strong>${plus ? formatBRL(plus.amountCents) : "R$ 99,90"}</strong><button class="button primary" type="button" data-buy-product="plus-monthly" ${!checkoutAvailable || commerceAccount.plusActive ? "disabled" : ""}>${commerceAccount.plusActive ? "Plus ativo" : checkoutAvailable ? "Assinar Plus" : "Checkout em configuração"}</button></div></section>
+      ${success ? `<div class="purchase-return ${recentStripeCredit || commerceAccount.plusActive ? "confirmed" : "pending"}">${icon(recentStripeCredit || commerceAccount.plusActive ? "badge-check" : "loader-circle")}<div><strong>${recentStripeCredit || commerceAccount.plusActive ? "Pagamento confirmado" : "Aguardando confirmação assinada"}</strong><span>${recentStripeCredit || commerceAccount.plusActive ? "O benefício já está vinculado à sua conta." : "Não feche esta página. O Stripe pode levar alguns segundos para enviar o webhook."}</span></div></div>` : ""}
+      ${!checkoutAvailable ? `<section class="store-availability">${icon("construction")}<div><strong>Loja em configuração</strong><p>Compras permanecem bloqueadas até banco, Price IDs e webhook Stripe estarem validados no servidor.</p></div></section>` : ""}
+      <section class="plus-offer"><div class="plus-mark">${icon("infinity")}</div><div><span>Assinatura mensal</span><h2>Neon Academy Plus</h2><p>Energia infinita, histórico maior do tutor e personalização completa da Academy.</p><ul><li>${icon("check")} Energia infinita nas Áreas</li><li>${icon("check")} Conversas maiores com o tutor</li><li>${icon("palette")} Temas Plus, fundos locais e busca Pexels quando configurada</li></ul></div><div class="plus-price"><span>${commerceAccount.plusActive ? "Plano ativo" : "Por mês"}</span><strong>${plus ? formatBRL(plus.amountCents) : "R$ 99,90"}</strong><button class="button primary" type="button" data-buy-product="plus-monthly" ${!checkoutAvailable || commerceAccount.plusActive ? "disabled" : ""}>${commerceAccount.plusActive ? "Plus ativo" : checkoutAvailable ? "Assinar Plus" : "Checkout em configuração"}</button></div></section>
       <section class="content-section"><div class="section-heading"><div><div class="eyebrow">Pacotes avulsos</div><h2>Cubic Energy</h2></div><p>Energia comprada nunca é removida por Renascimento.</p></div><div class="energy-store-grid">${energyProducts.length ? energyProducts.map((product) => `<article class="energy-product"><div>${icon("box")}<span>${product.energy}</span></div><h3>Cubic Energy</h3>${product.compareAtCents ? `<del>${formatBRL(product.compareAtCents)}</del>` : ""}<strong>${formatBRL(product.amountCents)}</strong><button class="button" type="button" data-buy-product="${product.id}" ${checkoutAvailable ? "" : "disabled"}>${checkoutAvailable ? "Comprar" : "Indisponível"}</button></article>`).join("") : '<div class="empty-state">Carregando catálogo seguro...</div>'}</div></section>
-      <section class="store-disclosure">${icon("shield-check")}<p>Preços e saldo são validados no servidor. Nenhum crédito é concedido antes do webhook do pagamento. Valores promocionais devem corresponder a preços reais praticados antes da publicação.</p></section>`;
+      <section class="content-section commerce-history"><div class="section-heading"><div><div class="eyebrow">Transparência</div><h2>Extrato de Cubic Energy</h2></div><p>Créditos e débitos confirmados pelo servidor.</p></div><div class="ledger-list">${commerceLedger.length ? commerceLedger.map((entry) => `<article><span class="ledger-delta ${entry.delta >= 0 ? "positive" : "negative"}">${entry.delta >= 0 ? "+" : ""}${Number(entry.delta).toLocaleString("pt-BR")}</span><div><strong>${escapeHtml(sourceLabels[entry.source] || entry.source.replace(/^admin_adjustment:.*/, "Ajuste administrativo"))}</strong><small>${new Date(entry.createdAt).toLocaleString("pt-BR")}</small></div></article>`).join("") : '<div class="empty-state">Nenhuma movimentação de energia comprada.</div>'}</div></section>
+      <section class="store-disclosure">${icon("shield-check")}<p>Preços e saldo são validados no servidor. Nenhum crédito é concedido antes do webhook. ${promotionVerified ? "Os preços anteriores foram marcados como verificados pelo operador." : "Preços riscados permanecem ocultos até existir comprovação da oferta."} Ao continuar, você aceita os <a href="/terms" target="_blank" rel="noopener">Termos de Uso</a> e a <a href="/privacy" target="_blank" rel="noopener">Política de Privacidade</a>.</p></section>`;
     if (commerceAccount.plusActive) {
       const plusAction = content.querySelector('[data-buy-product="plus-monthly"]');
       plusAction.disabled = false;
@@ -4399,7 +4406,7 @@ local scenarios = {
       ["scene3d", "Cubos 3D", "Cena procedural que reage à rolagem."],
       ["spoilerMode", "Proteção de código", "Scripts começam desfocados para compartilhamento de tela."],
     ];
-    content.innerHTML = `<header class="page-header"><div><div class="eyebrow">${icon("settings")} Preferências</div><h1>Configurações da Academy</h1><p class="lead">Controle movimento, som e privacidade visual sem alterar seu progresso.</p></div></header><section class="settings-list">${settings.map(([key, title, description]) => `<label><span class="settings-icon">${icon(key === "sounds" ? "volume-2" : key === "scene3d" ? "box" : key === "spoilerMode" ? "eye-off" : "sparkles")}</span><span><strong>${title}</strong><small>${description}</small></span><input type="checkbox" role="switch" data-setting="${key}" ${progress.settings[key] ? "checked" : ""}></label>`).join("")}</section>`;
+    content.innerHTML = `<header class="page-header"><div><div class="eyebrow">${icon("settings")} Preferências</div><h1>Configurações da Academy</h1><p class="lead">Controle movimento, som e privacidade visual sem alterar seu progresso.</p></div></header><section class="settings-list">${settings.map(([key, title, description]) => `<label><span class="settings-icon">${icon(key === "sounds" ? "volume-2" : key === "scene3d" ? "box" : key === "spoilerMode" ? "eye-off" : "sparkles")}</span><span><strong>${title}</strong><small>${description}</small></span><input type="checkbox" role="switch" data-setting="${key}" ${progress.settings[key] ? "checked" : ""}></label>`).join("")}</section><section class="account-services content-section"><div class="section-heading"><div><div class="eyebrow">Serviços da conta</div><h2>Estado da nuvem</h2></div></div><div class="service-status-grid"><article class="${syncStatus === "synced" ? "ready" : "pending"}">${icon("cloud")}<div><strong>Progresso</strong><span>${syncStatus === "synced" ? "Sincronizado no PostgreSQL" : "Armazenamento local ativo"}</span></div></article><article class="${tutorAudioConfig.available ? "ready" : "pending"}">${icon("audio-lines")}<div><strong>Áudio do tutor</strong><span>${tutorAudioConfig.available ? `R2 privado · ${tutorAudioConfig.retentionDays} dias` : "Aguardando PostgreSQL + R2"}</span></div></article><article class="${checkoutAvailable ? "ready" : "pending"}">${icon("credit-card")}<div><strong>Pagamentos</strong><span>${checkoutAvailable ? "Stripe Checkout disponível" : "Compras bloqueadas com segurança"}</span></div></article></div></section>`;
   }
 
   function extensionContext() {
@@ -4448,15 +4455,21 @@ local scenarios = {
   async function loadCommerceState() {
     if (window.location.protocol === "file:") return;
     try {
-      const [catalogResponse, accountResponse, audioResponse] = await Promise.all([
+      const [catalogResponse, accountResponse, ledgerResponse, audioResponse] = await Promise.all([
         fetch("/api/commerce/catalog", { credentials: "same-origin", cache: "no-store" }),
         fetch("/api/commerce/account", { credentials: "same-origin", cache: "no-store" }),
+        fetch("/api/commerce/ledger", { credentials: "same-origin", cache: "no-store" }),
         fetch("/api/tutor/audio/config", { credentials: "same-origin", cache: "no-store" }),
       ]);
       if (catalogResponse.ok) {
         const catalogPayload = await catalogResponse.json();
         commerceCatalog = catalogPayload.products || [];
         checkoutAvailable = catalogPayload.checkoutAvailable === true;
+        promotionVerified = catalogPayload.promotionVerified === true;
+      }
+      if (ledgerResponse.ok) {
+        const ledgerPayload = await ledgerResponse.json();
+        commerceLedger = Array.isArray(ledgerPayload.entries) ? ledgerPayload.entries : [];
       }
       if (accountResponse.ok) {
         const accountPayload = await accountResponse.json();
@@ -4481,8 +4494,13 @@ local scenarios = {
       if (currentRoute().startsWith("store")) render();
       if (currentRoute() === "tutor") render();
       if (currentRoute() === "themes") render();
+      if (currentRoute() === "store/success" && purchaseRefreshAttempts < 8) {
+        purchaseRefreshAttempts += 1;
+        setTimeout(() => loadCommerceState(), 2500);
+      }
     } catch (_error) {
       commerceAccount = { available: false, purchasedEnergy: 0, plusActive: false };
+      commerceLedger = [];
       tutorAudioConfig.available = false;
       window.NeonThemeStudio?.enforceEntitlement(false);
     }
@@ -4491,7 +4509,10 @@ local scenarios = {
   async function loadAdminState(force = false) {
     if (!currentUser?.isAdmin || (adminState.status === "loading" && !force)) return;
     adminState.status = "loading";
+    let readiness = adminState.readiness;
     try {
+      const readinessResponse = await fetch("/api/admin/readiness", { credentials: "same-origin", cache: "no-store" });
+      if (readinessResponse.ok) readiness = (await readinessResponse.json()).report || null;
       const usersResponse = await fetch(`/api/admin/users?query=${encodeURIComponent(adminState.query)}`, { credentials: "same-origin", cache: "no-store" });
       const usersPayload = await usersResponse.json();
       if (!usersResponse.ok) throw new Error(usersPayload.error || "AdministrationUnavailable");
@@ -4508,10 +4529,11 @@ local scenarios = {
         permissions: usersPayload.permissions || {},
         role: usersPayload.role || currentUser.role || "administrator",
         events,
+        readiness,
         error: "",
       };
     } catch (error) {
-      adminState = { ...adminState, status: "error", error: error.message, users: [], events: [] };
+      adminState = { ...adminState, status: "error", readiness, error: error.message, users: [], events: [] };
     }
     if (currentRoute() === "admin") render();
   }
@@ -4544,6 +4566,12 @@ local scenarios = {
     }).join("");
   }
 
+  function renderReadinessReport() {
+    const report = adminState.readiness;
+    if (!report) return "";
+    return `<section class="content-section readiness-panel"><div class="section-heading"><div><div class="eyebrow">Pré-lançamento</div><h2>Prontidão da Academy</h2></div><span class="readiness-score ${report.launchReady ? "ready" : "blocked"}">${report.automaticReady}/${report.automaticTotal} automáticos</span></div><div class="readiness-sections">${report.sections.map((section) => `<article><header><span>${icon(section.ready ? "circle-check-big" : "circle-dashed")}</span><div><strong>${escapeHtml(section.label)}</strong><small>${section.ready ? "Configuração automática completa" : "Ainda existem bloqueios"}</small></div></header><ul>${section.checks.map((item) => `<li class="${item.ready ? "ready" : item.kind === "manual" ? "manual" : "blocked"}">${icon(item.ready ? "check" : item.kind === "manual" ? "clipboard-check" : "x")}<div><strong>${escapeHtml(item.label)}</strong><span>${item.ready ? "Confirmado pelo servidor" : escapeHtml(item.action)}</span></div></li>`).join("")}</ul></article>`).join("")}</div></section>`;
+  }
+
   function renderAdmin() {
     if (!currentUser?.isAdmin) {
       content.innerHTML = `<section class="access-denied">${icon("shield-x")}<h1>Acesso administrativo restrito</h1><p>Sua sessão não possui um cargo administrativo válido.</p><button class="button" type="button" data-route="overview">Voltar</button></section>`;
@@ -4555,6 +4583,7 @@ local scenarios = {
     content.innerHTML = `
       <header class="page-header"><div><div class="eyebrow">${icon("shield-ellipsis")} Operação privada</div><h1>Administração</h1><p class="lead">Usuários, sessões, cargos, energia e eventos auditáveis validados no servidor.</p></div><div class="header-actions"><span class="admin-role role-${escapeHtml(adminState.role || currentUser.role || "administrator")}">${escapeHtml(adminState.role || currentUser.role || "administrator")}</span><button class="button" type="button" data-admin-refresh>${icon("refresh-cw")} Atualizar</button></div></header>
       <section class="admin-grid"><article><span>Usuários registrados</span><strong>${ready ? adminState.total : "..."}</strong><p>Contas conhecidas pelo login</p></article><article><span>Conta administrativa</span><strong>${escapeHtml(currentUser.email)}</strong><p>Sessão assinada e cargo verificado ao vivo</p></article><article><span>Persistência</span><strong>${syncStatus === "synced" || ready ? "PostgreSQL ativo" : "Verificando"}</strong><p>${completed} aulas concluídas nesta conta</p></article></section>
+      ${renderReadinessReport()}
       ${adminState.status === "error" ? `<section class="admin-error">${icon("database-zap")}<div><strong>Painel indisponível</strong><p>Configure <code>DATABASE_URL</code> para habilitar usuários, auditoria e ações administrativas.</p></div></section>` : `<section class="admin-console content-section"><div class="section-heading"><div><div class="eyebrow">Diretório</div><h2>Usuários do servidor</h2></div><form data-admin-search><input name="query" type="search" maxlength="80" value="${escapeHtml(adminState.query)}" placeholder="Buscar nome ou e-mail"><button class="icon-button" aria-label="Buscar" title="Buscar">${icon("search")}</button></form></div><div class="admin-table-wrap"><table class="admin-users-table"><thead><tr><th>Usuário</th><th>Cargo</th><th>Energia</th><th>Status</th><th>Ações</th></tr></thead><tbody>${ready ? renderAdminUserRows() : `<tr><td colspan="5"><div class="admin-loading">Carregando diretório seguro...</div></td></tr>`}</tbody></table></div></section>`}
       ${adminState.permissions["audit.read"] ? `<section class="admin-audit content-section"><div class="section-heading"><div><div class="eyebrow">Auditoria</div><h2>Últimas operações</h2></div><p>Ações administrativas não aparecem para usuários comuns.</p></div><div class="admin-audit-list">${adminState.events.length ? adminState.events.map((event) => `<article><span>${icon(event.action === "ban" ? "ban" : event.action === "adjust_energy" ? "box" : "shield-check")}</span><div><strong>${escapeHtml(event.action)}</strong><small>${escapeHtml(event.actorEmail)} · alvo ${escapeHtml(event.targetSub || "sistema")}</small></div><time>${adminDate(event.createdAt)}</time></article>`).join("") : '<div class="empty-state">Nenhuma operação administrativa registrada.</div>'}</div></section>` : ""}
       <section class="content-section"><div class="section-heading"><div><div class="eyebrow">Portabilidade pessoal</div><h2>Backup do seu perfil</h2></div></div><div class="admin-actions"><button class="button primary" type="button" data-export-profile>${icon("download")} Exportar backup</button><button class="button" type="button" data-import-profile>${icon("upload")} Importar backup</button><button class="button" type="button" data-sync-now>${icon("cloud-upload")} Sincronizar agora</button></div></section>`;
@@ -4562,6 +4591,7 @@ local scenarios = {
 
   function render() {
     const route = currentRoute();
+    if (route !== "store/success") purchaseRefreshAttempts = 0;
     if (route !== "tutor" && tutorAudioRecorder?.state === "recording") {
       stopTutorAudioRecording(true);
     }
@@ -5358,13 +5388,21 @@ local scenarios = {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productId: buyTarget.dataset.buyProduct }),
+        body: JSON.stringify({
+          productId: buyTarget.dataset.buyProduct,
+          requestId: globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        }),
       }).then(async (response) => {
         const payload = await response.json();
         if (!response.ok || !payload.checkoutUrl) throw new Error(payload.error || "CheckoutUnavailable");
         window.location.assign(payload.checkoutUrl);
-      }).catch(() => {
-        showToast("Checkout ainda não está configurado no servidor.");
+      }).catch((error) => {
+        const messages = {
+          StripePriceMismatch: "O preço no Stripe não corresponde ao catálogo da Academy.",
+          CheckoutRateLimit: "Muitas tentativas de checkout. Aguarde alguns minutos.",
+          CheckoutUnavailable: "Checkout ainda não está configurado no servidor.",
+        };
+        showToast(messages[error.message] || "Não foi possível abrir o checkout agora.");
         render();
       });
       return;

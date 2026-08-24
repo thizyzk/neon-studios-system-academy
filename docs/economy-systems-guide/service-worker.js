@@ -1,4 +1,4 @@
-const CACHE_NAME = "neon-academy-v6";
+const CACHE_NAME = "neon-academy-v7";
 const APP_SHELL = [
   "/",
   "/styles.css",

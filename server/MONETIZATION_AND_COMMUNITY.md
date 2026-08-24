@@ -2,11 +2,12 @@
 
 ## Estado atual
 
-O catalogo, a interface da loja, o checkout Stripe e o ledger de energia estao implementados. O checkout falha fechado enquanto qualquer um destes itens estiver ausente:
+O catalogo, a interface da loja, o checkout Stripe, o extrato e o ledger de energia estao implementados. O checkout falha fechado enquanto qualquer um destes itens estiver ausente:
 
 - `DATABASE_URL`
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
+- os cinco `STRIPE_PRICE_*`
 
 Isso impede que uma compra exista apenas no navegador. Energia e Plus so mudam depois de um evento Stripe assinado e idempotente.
 
@@ -14,13 +15,16 @@ Isso impede que uma compra exista apenas no navegador. Energia e Plus so mudam d
 
 1. Crie um PostgreSQL persistente e copie a URL interna para `DATABASE_URL`.
 2. No Stripe, use o modo de teste primeiro e copie a chave secreta para `STRIPE_SECRET_KEY`.
-3. Crie um webhook para `https://neon-studios-system-academy.onrender.com/api/commerce/webhook`.
-4. Selecione `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `charge.refunded` e `charge.dispute.created`.
-5. Copie o segredo de assinatura do endpoint para `STRIPE_WEBHOOK_SECRET`.
-6. Ative o Stripe Customer Portal para permitir cancelamento e gerenciamento da assinatura.
-7. Publique e confira `/health`: `commerceConfigured` deve ser `true`.
-8. Faca uma compra de teste e confirme que repetir o mesmo evento nao duplica energia.
-9. Teste cancelamento, reembolso e saldo insuficiente antes de trocar para chaves de producao.
+3. Crie os cinco Products/Prices do catalogo e copie os IDs `price_...` para as variaveis `STRIPE_PRICE_*`.
+4. Crie um webhook para `https://SEU-DOMINIO/api/commerce/webhook`.
+5. Selecione `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid`, `invoice.payment_failed`, `charge.refunded` e `charge.dispute.created`.
+6. Copie o segredo de assinatura do endpoint para `STRIPE_WEBHOOK_SECRET`.
+7. Ative o Stripe Customer Portal para permitir cancelamento e gerenciamento da assinatura.
+8. Publique e confira `/health`: `commerceConfigured` deve ser `true`.
+9. Faca uma compra de teste e confirme que repetir o mesmo evento nao duplica energia.
+10. Teste cancelamento, falha de fatura, reembolso e saldo insuficiente antes de trocar para chaves de producao.
+
+O passo a passo completo esta em `LAUNCH_CHECKLIST.md`.
 
 O Plus usa assinatura mensal. Pacotes de energia usam pagamento unico. Pix pode ser habilitado para pagamentos unicos se estiver disponivel na conta Stripe, mas nao deve ser usado como forma recorrente do Plus.
 

@@ -8,15 +8,16 @@ import { OAuth2Client } from "google-auth-library";
 import Stripe from "stripe";
 
 import { ADMIN_ROLES, createAdminStore, hasAdminPermission, normalizeAdminRole } from "./adminStore.js";
-import { COMMERCE_CATALOG, findCommerceProduct } from "./commerceCatalog.js";
+import { COMMERCE_CATALOG, findCommerceProduct, stripePriceMatchesProduct } from "./commerceCatalog.js";
 import { createCommerceStore } from "./commerceStore.js";
 import { readConfig } from "./config.js";
 import { createLearningStore } from "./learningStore.js";
 import { createR2AudioStorage, validateAudioUpload } from "./r2AudioStorage.js";
+import { buildReadinessReport } from "./readiness.js";
 import { createSignedSession, verifySignedSession } from "./signedSession.js";
 import { exchangeAuthorizationCode, getUserInfo, listVideos, queryVideos, refreshAccessToken } from "./tiktokClient.js";
 import { createTutorAudioStore } from "./tutorAudioStore.js";
-import { readTokenStore, withTokenTimestamps, writeTokenStore } from "./tokenStore.js";
+import { createTokenStore, withTokenTimestamps } from "./tokenStore.js";
 
 const config = readConfig();
 const STATE_MAX_AGE_SECONDS = 10 * 60;
@@ -37,8 +38,15 @@ const adminStore = createAdminStore(config.databaseUrl, config.adminEmails);
 const tutorAudioStore = createTutorAudioStore(config.databaseUrl);
 const r2AudioStorage = createR2AudioStorage(config);
 const stripe = config.stripeSecretKey ? new Stripe(config.stripeSecretKey) : null;
+const tokenStore = createTokenStore({
+  databaseUrl: config.databaseUrl,
+  filePath: config.tokenStorePath,
+  encryptionSecret: config.authSessionSecret,
+});
 const pexelsCache = new Map();
 const pexelsRateLimits = new Map();
+const checkoutRateLimits = new Map();
+const stripePriceCache = new Map();
 
 const contentTypes = new Map([
   [".css", "text/css; charset=utf-8"],
@@ -83,7 +91,11 @@ function applySecurityHeaders(response, request) {
   response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   response.setHeader("X-Content-Type-Options", "nosniff");
   response.setHeader("X-Frame-Options", isEmbeddedLuau ? "SAMEORIGIN" : "DENY");
+  response.setHeader("X-Permitted-Cross-Domain-Policies", "none");
   response.setHeader("Permissions-Policy", "camera=(), microphone=(self), geolocation=()");
+  if (config.publicBaseUrl.startsWith("https://")) {
+    response.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
 }
 
 function isAuthConfigured() {
@@ -93,6 +105,37 @@ function isAuthConfigured() {
     && config.recaptchaSecretKey
     && Buffer.byteLength(config.authSessionSecret, "utf8") >= 32
   );
+}
+
+function isCommerceConfigured() {
+  return Boolean(
+    stripe
+    && commerceStore.available
+    && config.stripeWebhookSecret
+    && COMMERCE_CATALOG.every((product) => String(config.stripePriceIds[product.id] || "").startsWith("price_"))
+  );
+}
+
+function consumeCheckoutAttempt(userSub) {
+  const now = Date.now();
+  const windowMs = 10 * 60 * 1000;
+  const attempts = (checkoutRateLimits.get(userSub) || []).filter((timestamp) => now - timestamp < windowMs);
+  if (attempts.length >= 6) {
+    return { allowed: false, retryAfterSeconds: Math.ceil((windowMs - (now - attempts[0])) / 1000) };
+  }
+  attempts.push(now);
+  checkoutRateLimits.set(userSub, attempts);
+  return { allowed: true, retryAfterSeconds: 0 };
+}
+
+async function validateConfiguredStripePrice(product) {
+  const priceId = config.stripePriceIds[product.id];
+  const cached = stripePriceCache.get(priceId);
+  if (cached && Date.now() - cached.checkedAt < 15 * 60 * 1000) return cached.valid;
+  const price = await stripe.prices.retrieve(priceId);
+  const valid = stripePriceMatchesProduct(product, price);
+  stripePriceCache.set(priceId, { checkedAt: Date.now(), valid });
+  return valid;
 }
 
 function getAuthConfigurationStatus() {
@@ -501,7 +544,7 @@ function mergeVideoDetails(baseVideos, detailedVideos) {
 }
 
 async function getUsableToken() {
-  const store = await readTokenStore(config.tokenStorePath);
+  const store = await tokenStore.read();
   const token = store.token;
 
   if (!token?.access_token || !token?.refresh_token) {
@@ -514,7 +557,7 @@ async function getUsableToken() {
 
   const refreshed = await refreshAccessToken(config, token.refresh_token);
   const nextToken = withTokenTimestamps(refreshed);
-  await writeTokenStore(config.tokenStorePath, {
+  await tokenStore.write({
     ...store,
     token: nextToken,
   });
@@ -577,10 +620,12 @@ async function getReels(limit) {
   return payload;
 }
 
-async function handleAuthStart(_request, response) {
+async function handleAuthStart(request, response) {
   if (!requireTikTokConfig(response)) {
     return;
   }
+  const session = await requireAdminSession(request, response, "integrations.manage");
+  if (!session) return;
 
   const state = crypto.randomBytes(32).toString("hex");
   const codeVerifier = createCodeVerifier();
@@ -596,6 +641,8 @@ async function handleAuthCallback(request, response, requestUrl) {
   if (!requireTikTokConfig(response)) {
     return;
   }
+  const session = await requireAdminSession(request, response, "integrations.manage");
+  if (!session) return;
 
   const code = requestUrl.searchParams.get("code");
   const state = requestUrl.searchParams.get("state");
@@ -615,8 +662,8 @@ async function handleAuthCallback(request, response, requestUrl) {
   }
 
   const token = withTokenTimestamps(await exchangeAuthorizationCode(config, code, codeVerifier));
-  const store = await readTokenStore(config.tokenStorePath);
-  await writeTokenStore(config.tokenStorePath, {
+  const store = await tokenStore.read();
+  await tokenStore.write({
     ...store,
     token,
     authorized_at: new Date().toISOString(),
@@ -854,7 +901,7 @@ function publicCatalog() {
     description: product.description,
     energy: product.energy ?? null,
     amountCents: product.amountCents,
-    compareAtCents: product.compareAtCents ?? null,
+    compareAtCents: config.promotionalPricesVerified ? product.compareAtCents ?? null : null,
     currency: product.currency,
     interval: product.interval ?? null,
   }));
@@ -866,7 +913,8 @@ async function handleCommerceCatalog(request, response) {
   sendJson(response, 200, {
     ok: true,
     products: publicCatalog(),
-    checkoutAvailable: Boolean(stripe && commerceStore.available && config.stripeWebhookSecret),
+    checkoutAvailable: isCommerceConfigured(),
+    promotionVerified: config.promotionalPricesVerified,
   });
 }
 
@@ -881,6 +929,16 @@ async function handleCommerceAccount(request, response) {
   sendJson(response, 200, { ok: true, available: true, ...account });
 }
 
+async function handleCommerceLedger(request, response) {
+  const session = await requireAuthSession(request, response);
+  if (!session) return;
+  if (!commerceStore.available) {
+    sendJson(response, 200, { ok: true, available: false, entries: [] });
+    return;
+  }
+  sendJson(response, 200, { ok: true, available: true, entries: await commerceStore.listLedger(session.user, 30) });
+}
+
 async function handleCommerceCheckout(request, response) {
   const session = await requireAuthSession(request, response);
   if (!session) return;
@@ -888,7 +946,7 @@ async function handleCommerceCheckout(request, response) {
     sendJson(response, 403, { ok: false, error: "InvalidOrigin" });
     return;
   }
-  if (!stripe || !commerceStore.available || !config.stripeWebhookSecret) {
+  if (!isCommerceConfigured()) {
     sendJson(response, 503, { ok: false, error: "CheckoutUnavailable" });
     return;
   }
@@ -899,6 +957,16 @@ async function handleCommerceCheckout(request, response) {
     sendJson(response, 400, { ok: false, error: "UnknownProduct" });
     return;
   }
+  const rate = consumeCheckoutAttempt(session.user.sub);
+  if (!rate.allowed) {
+    response.setHeader("Retry-After", String(rate.retryAfterSeconds));
+    sendJson(response, 429, { ok: false, error: "CheckoutRateLimit", retryAfterSeconds: rate.retryAfterSeconds });
+    return;
+  }
+  if (!await validateConfiguredStripePrice(product)) {
+    sendJson(response, 503, { ok: false, error: "StripePriceMismatch" });
+    return;
+  }
 
   const metadata = {
     user_sub: session.user.sub,
@@ -906,28 +974,28 @@ async function handleCommerceCheckout(request, response) {
     product_type: product.type,
     energy: String(product.energy ?? 0),
   };
-  const priceData = {
-    currency: product.currency,
-    unit_amount: product.amountCents,
-    product_data: { name: product.name, description: product.description },
-  };
-  if (product.type === "subscription") {
-    priceData.recurring = { interval: product.interval };
-  }
-
   const stripeCustomerId = await commerceStore.getStripeCustomerId(session.user);
+  const requestId = typeof body.requestId === "string" && /^[a-zA-Z0-9_-]{8,80}$/.test(body.requestId)
+    ? body.requestId
+    : crypto.randomUUID();
+  const idempotencyKey = crypto.createHash("sha256")
+    .update(`${session.user.sub}:${product.id}:${requestId}`)
+    .digest("hex");
 
   const checkout = await stripe.checkout.sessions.create({
     mode: product.type === "subscription" ? "subscription" : "payment",
     ...(stripeCustomerId ? { customer: stripeCustomerId } : { customer_email: session.user.email }),
     client_reference_id: session.user.sub,
-    line_items: [{ quantity: 1, price_data: priceData }],
+    line_items: [{ quantity: 1, price: config.stripePriceIds[product.id] }],
     metadata,
     ...(product.type === "subscription" ? { subscription_data: { metadata } } : {}),
     ...(product.type === "energy" ? { payment_intent_data: { metadata } } : {}),
+    consent_collection: { terms_of_service: "required" },
+    allow_promotion_codes: config.stripeAllowPromotionCodes,
+    automatic_tax: { enabled: config.stripeAutomaticTax },
     success_url: `${config.publicBaseUrl}/#store/success`,
     cancel_url: `${config.publicBaseUrl}/#store`,
-  });
+  }, { idempotencyKey });
   sendJson(response, 200, { ok: true, checkoutUrl: checkout.url });
 }
 
@@ -1001,6 +1069,12 @@ async function handleCommunityStatus(request, response) {
     safetyGate: true,
     capabilities: { friends: false, groups: false, images: false, calls: false, streaming: false },
   });
+}
+
+async function handleReadiness(request, response) {
+  const session = await requireAdminSession(request, response, "audit.read");
+  if (!session) return;
+  sendJson(response, 200, { ok: true, report: buildReadinessReport(config) });
 }
 
 function consumePexelsSearch(userSub) {
@@ -1390,10 +1464,11 @@ async function route(request, response) {
       ok: true,
       service: "neon-studios-system-academy",
       curriculumSystems: 170,
+      launchReady: buildReadinessReport(config).launchReady,
       authConfigured: isAuthConfigured(),
       learningSyncConfigured: learningStore.available,
       administrationConfigured: adminStore.available,
-      commerceConfigured: Boolean(stripe && commerceStore.available && config.stripeWebhookSecret),
+      commerceConfigured: isCommerceConfigured(),
       audioStorageConfigured: isTutorAudioConfigured(),
       pexelsConfigured: Boolean(config.pexelsApiKey),
       communityEnabled: config.communityEnabled,
@@ -1441,6 +1516,11 @@ async function route(request, response) {
     return;
   }
 
+  if (request.method === "GET" && requestUrl.pathname === "/api/commerce/ledger") {
+    await handleCommerceLedger(request, response);
+    return;
+  }
+
   if (request.method === "POST" && requestUrl.pathname === "/api/commerce/checkout") {
     await handleCommerceCheckout(request, response);
     return;
@@ -1478,6 +1558,11 @@ async function route(request, response) {
 
   if (request.method === "GET" && requestUrl.pathname === "/api/admin/audit") {
     await handleAdminAudit(request, response);
+    return;
+  }
+
+  if (request.method === "GET" && requestUrl.pathname === "/api/admin/readiness") {
+    await handleReadiness(request, response);
     return;
   }
 

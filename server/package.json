@@ -7,7 +7,7 @@
     "start": "node src/index.js",
     "test": "node --test",
     "download:ambient-videos": "node scripts/downloadAmbientVideos.js",
-    "check": "node --check src/index.js && node --check src/config.js && node --check src/adminStore.js && node --check src/commerceCatalog.js && node --check src/commerceStore.js && node --check src/learningStore.js && node --check src/r2AudioStorage.js && node --check src/tutorAudioStore.js && node --check src/signedSession.js && node --check src/tiktokClient.js && node --check src/tokenStore.js && node --check ../docs/economy-systems-guide/asset-cache.js && node --check ../docs/economy-systems-guide/academy-themes.js && node --check ../docs/economy-systems-guide/roblox-ui-visualizer.js && node --check ../docs/economy-systems-guide/system-expansion.js && node --check ../docs/economy-systems-guide/app.js && node --check scripts/downloadAmbientVideos.js"
+    "check": "node --check src/index.js && node --check src/config.js && node --check src/readiness.js && node --check src/adminStore.js && node --check src/commerceCatalog.js && node --check src/commerceStore.js && node --check src/learningStore.js && node --check src/r2AudioStorage.js && node --check src/tutorAudioStore.js && node --check src/signedSession.js && node --check src/tiktokClient.js && node --check src/tokenStore.js && node --check ../docs/economy-systems-guide/asset-cache.js && node --check ../docs/economy-systems-guide/academy-themes.js && node --check ../docs/economy-systems-guide/roblox-ui-visualizer.js && node --check ../docs/economy-systems-guide/system-expansion.js && node --check ../docs/economy-systems-guide/app.js && node --check scripts/downloadAmbientVideos.js"
   },
   "engines": {
     "node": ">=20"

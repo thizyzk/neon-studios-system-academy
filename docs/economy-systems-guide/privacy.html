@@ -22,12 +22,19 @@
       <h2>Progresso, textos e áudios</h2>
       <p>O progresso e as mensagens de texto podem ser armazenados no PostgreSQL do serviço. Quando o usuário escolhe gravar uma mensagem de voz, o arquivo é enviado a um bucket privado do Cloudflare R2; o PostgreSQL guarda somente identificador, duração, formato, tamanho, datas e eventual transcrição.</p>
 
+      <h2>Pagamentos e assinatura</h2>
+      <p>Quando a loja estiver ativa, o Stripe processa o pagamento e envia à Academy identificadores técnicos de cliente, checkout, assinatura e evento, além do estado do pagamento. A Academy armazena o estado Plus, o saldo comprado e um extrato de créditos ou débitos. Dados completos do cartão não são recebidos pelo servidor da Academy.</p>
+
+      <h2>Fundos Pexels e arquivos locais</h2>
+      <p>Usuários Plus podem pesquisar fundos pela API do Pexels. A consulta é enviada ao servidor da Academy e ao Pexels sem incluir o conteúdo das aulas. Imagens e vídeos escolhidos diretamente do computador permanecem no IndexedDB do navegador e não são enviados ao backend por esse recurso.</p>
+
       <h2>Finalidade</h2>
-      <p>Os dados são usados para identificar o usuário, criar uma sessão protegida e aplicar eventual restrição de acesso por domínio Google Workspace.</p>
+      <p>Os dados são usados para identificar o usuário, criar uma sessão protegida, sincronizar progresso, entregar benefícios comprados, prevenir fraude, manter auditoria e aplicar eventual restrição de acesso ou moderação.</p>
 
       <h2>Sessão e retenção</h2>
       <p>O navegador recebe um cookie de sessão HttpOnly assinado, com validade limitada e os dados mínimos de perfil usados pela interface. O servidor não mantém um arquivo de sessões e o ID token recebido durante o login não é armazenado.</p>
       <p>Áudios do tutor usam retenção padrão de 30 dias e URLs assinadas temporárias. O usuário pode excluí-los antes desse prazo pelo próprio tutor. Backups e exclusões físicas podem obedecer ao prazo operacional dos provedores.</p>
+      <p>Eventos de pagamento e extratos podem ser mantidos pelo prazo necessário para segurança, suporte, contabilidade e cumprimento de obrigações. Pedidos de acesso, correção ou exclusão serão avaliados considerando registros que precisem ser preservados legalmente.</p>
 
       <h2>Operadores e segurança</h2>
       <p>Google processa autenticação e reCAPTCHA; Render hospeda a aplicação e o PostgreSQL; Cloudflare armazena os áudios privados; Stripe processa pagamentos quando a loja estiver ativa. Chaves de infraestrutura não são enviadas ao navegador.</p>

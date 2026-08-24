@@ -6,6 +6,8 @@ Para configurar monetizacao e entender por que os recursos sociais continuam blo
 
 Para configurar mensagens de voz privadas, leia [CLOUDFLARE_R2_SETUP.md](./CLOUDFLARE_R2_SETUP.md).
 
+Para publicar banco, Stripe, Cloudflare, dominio e fazer o QA final na ordem correta, siga [LAUNCH_CHECKLIST.md](./LAUNCH_CHECKLIST.md).
+
 ## Execucao local
 
 1. Copie `.env.example` para `.env` e preencha somente os valores usados.
@@ -61,7 +63,7 @@ npm start
 6. Abra `http://localhost:3000/auth/tiktok` no navegador e autorize a conta TikTok que fornecerá os reels.
 7. Publique este servidor em HTTPS antes de usar em produção e configure `ServerUrl` em `src/ServerScriptService/Config/TikTokReelsConfig.luau`.
 
-O servidor salva tokens em `server/.data/tiktok-session.json`, que é ignorado pelo Git.
+Com `DATABASE_URL`, o servidor salva tokens TikTok criptografados no PostgreSQL. Sem banco, o arquivo local `server/.data/tiktok-session.json` continua disponível apenas para desenvolvimento. Somente uma conta `owner` pode iniciar ou concluir essa conexão.
 
 ## Baixar vídeos de natureza/ambientação
 

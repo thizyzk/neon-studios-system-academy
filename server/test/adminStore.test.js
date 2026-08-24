@@ -10,7 +10,9 @@ test("administration hierarchy grants only the intended permissions", () => {
   assert.equal(hasAdminPermission("moderator", "users.ban"), true);
   assert.equal(hasAdminPermission("administrator", "energy.adjust"), true);
   assert.equal(hasAdminPermission("administrator", "roles.manage"), false);
+  assert.equal(hasAdminPermission("administrator", "integrations.manage"), false);
   assert.equal(hasAdminPermission("owner", "roles.manage"), true);
+  assert.equal(hasAdminPermission("owner", "integrations.manage"), true);
   assert.equal(normalizeAdminRole("invented"), "user");
 });
 

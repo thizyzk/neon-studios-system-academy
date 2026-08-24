@@ -55,7 +55,7 @@ O PostgreSQL tambem deixa de emitir URLs depois da retencao configurada. A lifec
 No Web Service, abra `Environment` e adicione:
 
 ```text
-DATABASE_URL=<internal database url do Render Postgres>
+DATABASE_URL=<pooled PostgreSQL URL do Neon, com sslmode=require>
 R2_ACCOUNT_ID=<account id>
 R2_ACCESS_KEY_ID=<access key id>
 R2_SECRET_ACCESS_KEY=<secret access key>

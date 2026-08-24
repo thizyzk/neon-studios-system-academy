@@ -6,6 +6,7 @@ export function createCommerceStore(databaseUrl) {
       available: false,
       async getAccount() { return null; },
       async getStripeCustomerId() { return null; },
+      async listLedger() { return []; },
       async processStripeEvent() { return { processed: false, reason: "unavailable" }; },
       async consumeEnergy() { return { ok: false, error: "unavailable" }; },
       async adminAdjustEnergy() { return { ok: false, error: "unavailable" }; },
@@ -49,11 +50,12 @@ export function createCommerceStore(databaseUrl) {
     return schemaPromise;
   }
 
-  async function ensureAccount(client, userSub, email = "unknown@invalid.local") {
+  async function ensureAccount(client, userSub, email = null) {
     await client.query(`
       INSERT INTO academy_commerce_accounts (google_sub, email)
-      VALUES ($1, $2)
-      ON CONFLICT (google_sub) DO UPDATE SET email = EXCLUDED.email, updated_at = NOW()
+      VALUES ($1, COALESCE($2, 'unknown@invalid.local'))
+      ON CONFLICT (google_sub) DO UPDATE
+      SET email = COALESCE($2, academy_commerce_accounts.email), updated_at = NOW()
     `, [userSub, email]);
   }
 
@@ -87,6 +89,24 @@ export function createCommerceStore(databaseUrl) {
       return result.rows[0]?.stripe_customer_id || null;
     },
 
+    async listLedger(user, limit = 30) {
+      await ensureSchema();
+      const result = await pool.query(`
+        SELECT id, delta, source, external_id, created_at
+        FROM academy_energy_ledger
+        WHERE google_sub = $1
+        ORDER BY created_at DESC
+        LIMIT $2
+      `, [user.sub, Math.min(100, Math.max(1, Number(limit) || 30))]);
+      return result.rows.map((row) => ({
+        id: String(row.id),
+        delta: Number(row.delta),
+        source: row.source,
+        externalId: row.external_id || null,
+        createdAt: row.created_at,
+      }));
+    },
+
     async processStripeEvent(event) {
       await ensureSchema();
       const client = await pool.connect();
@@ -102,9 +122,33 @@ export function createCommerceStore(databaseUrl) {
         }
 
         const object = event.data.object;
-        const userSub = object.metadata?.user_sub || object.client_reference_id || "";
-        if (event.type === "checkout.session.completed" && userSub) {
-          await ensureAccount(client, userSub, object.customer_details?.email || "unknown@invalid.local");
+        const invoiceMetadata = object.parent?.subscription_details?.metadata
+          || object.subscription_details?.metadata
+          || {};
+        let userSub = object.metadata?.user_sub || invoiceMetadata.user_sub || object.client_reference_id || "";
+        if (!userSub && object.customer) {
+          const ownerResult = await client.query(`
+            SELECT google_sub FROM academy_commerce_accounts
+            WHERE stripe_customer_id = $1 LIMIT 1
+          `, [String(object.customer)]);
+          userSub = ownerResult.rows[0]?.google_sub || "";
+        }
+        const accountEvent = [
+          "checkout.session.completed",
+          "checkout.session.async_payment_succeeded",
+          "customer.subscription.created",
+          "customer.subscription.updated",
+          "customer.subscription.deleted",
+          "invoice.paid",
+          "invoice.payment_failed",
+          "charge.refunded",
+          "charge.dispute.created",
+        ].includes(event.type);
+        if (accountEvent && !userSub) {
+          throw new Error(`StripeAccountOwnerNotFound:${event.type}`);
+        }
+        if (["checkout.session.completed", "checkout.session.async_payment_succeeded"].includes(event.type) && userSub) {
+          await ensureAccount(client, userSub, object.customer_details?.email || null);
           if (object.metadata?.product_type === "energy" && object.payment_status === "paid") {
             const energy = Number.parseInt(object.metadata.energy || "0", 10);
             if (Number.isInteger(energy) && energy > 0) {
@@ -138,10 +182,26 @@ export function createCommerceStore(databaseUrl) {
           `, [userSub, plusActive, String(object.customer || "") || null, String(object.id || "") || null]);
         }
 
+        if (["invoice.paid", "invoice.payment_failed"].includes(event.type) && userSub) {
+          await ensureAccount(client, userSub);
+          const plusActive = event.type === "invoice.paid";
+          const subscriptionId = object.parent?.subscription_details?.subscription
+            || object.subscription
+            || null;
+          await client.query(`
+            UPDATE academy_commerce_accounts
+            SET plus_active = $2,
+                stripe_customer_id = COALESCE(NULLIF($3, ''), stripe_customer_id),
+                stripe_subscription_id = COALESCE(NULLIF($4, ''), stripe_subscription_id),
+                updated_at = NOW()
+            WHERE google_sub = $1
+          `, [userSub, plusActive, String(object.customer || ""), String(subscriptionId || "")]);
+        }
+
         const reversesEnergy = event.type === "charge.dispute.created"
           || (event.type === "charge.refunded" && (object.refunded === true || object.amount_refunded >= object.amount));
         if (reversesEnergy && userSub && object.metadata?.product_type === "energy") {
-          await ensureAccount(client, userSub, object.billing_details?.email || "unknown@invalid.local");
+          await ensureAccount(client, userSub, object.billing_details?.email || null);
           const requestedEnergy = Number.parseInt(object.metadata.energy || "0", 10);
           if (Number.isInteger(requestedEnergy) && requestedEnergy > 0) {
             const balanceResult = await client.query(`
