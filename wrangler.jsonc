@@ -1,0 +1,22 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "neon-studios-system-academy",
+  "main": "server/src/worker.js",
+  "compatibility_date": "2026-08-24",
+  "assets": {
+    "directory": "./.cloudflare/assets",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "CLOUDFLARE_WORKERS": "true",
+    "NODE_ENV": "production",
+    "PORT": "3000",
+    "TRUST_PROXY": "true",
+    "COMMUNITY_ENABLED": "false",
+    "PROMOTIONAL_PRICES_VERIFIED": "false"
+  }
+}

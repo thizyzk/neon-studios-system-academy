@@ -1709,7 +1709,7 @@ async function route(request, response) {
   });
 }
 
-const server = http.createServer((request, response) => {
+export const server = http.createServer((request, response) => {
   applySecurityHeaders(response, request);
   route(request, response).catch((error) => {
     console.error(error);
@@ -1722,6 +1722,10 @@ const server = http.createServer((request, response) => {
   });
 });
 
-server.listen(config.port, () => {
-  console.log(`Neon Studios System Academy listening on ${config.publicBaseUrl}`);
-});
+export const serverPort = config.port;
+
+if (process.env.CLOUDFLARE_WORKERS !== "true") {
+  server.listen(serverPort, () => {
+    console.log(`Neon Studios System Academy listening on ${config.publicBaseUrl}`);
+  });
+}

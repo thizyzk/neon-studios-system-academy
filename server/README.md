@@ -8,7 +8,9 @@ Para configurar mensagens de voz privadas, leia [CLOUDFLARE_R2_SETUP.md](./CLOUD
 
 Para publicar banco, Stripe, Cloudflare, dominio e fazer o QA final na ordem correta, siga [LAUNCH_CHECKLIST.md](./LAUNCH_CHECKLIST.md).
 
-Para migrar o servidor Node.js do Render para a hospedagem gerenciada da Hostinger sem interromper o site, siga [HOSTINGER_MIGRATION.md](./HOSTINGER_MIGRATION.md).
+Para publicar no plano gratuito do Cloudflare Workers sem interromper o Render, siga [CLOUDFLARE_WORKERS_SETUP.md](./CLOUDFLARE_WORKERS_SETUP.md).
+
+O guia [HOSTINGER_MIGRATION.md](./HOSTINGER_MIGRATION.md) permanece apenas como alternativa futura de hospedagem Node.js tradicional.
 
 ## Execucao local
 

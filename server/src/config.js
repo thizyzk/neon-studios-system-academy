@@ -3,8 +3,11 @@ import process from "node:process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-const serverRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const projectRoot = path.resolve(serverRoot, "..");
+const isCloudflareWorker = process.env.CLOUDFLARE_WORKERS === "true";
+const serverRoot = isCloudflareWorker
+  ? "/server"
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const projectRoot = isCloudflareWorker ? "/" : path.resolve(serverRoot, "..");
 
 function loadDotEnv() {
   const envPath = path.resolve(process.cwd(), ".env");

@@ -22,6 +22,8 @@ Leia o guia completo em [docs/GUIA_MODELOS.md](docs/GUIA_MODELOS.md).
 A plataforma de ensino pode ser servida com login Google, reCAPTCHA e domínio próprio pelo backend em `server/`.
 Leia [docs/AUTH_SETUP.md](docs/AUTH_SETUP.md) para configurar credenciais, DNS, HTTPS e restrição opcional por Google Workspace.
 
+A implantacao principal agora usa Cloudflare Workers e Static Assets. O passo a passo esta em [server/CLOUDFLARE_WORKERS_SETUP.md](server/CLOUDFLARE_WORKERS_SETUP.md).
+
 ## Unidade do mundo
 
 Toda medida fisica do mundo 3D usa studs: tamanho de pecas, posicoes, offsets,

@@ -6,9 +6,16 @@
     "postinstall": "npm --prefix server ci --omit=dev",
     "start": "npm --prefix server start",
     "check": "npm --prefix server run check",
-    "test": "npm --prefix server test"
+    "test": "npm --prefix server test",
+    "cf:build": "node server/scripts/prepareCloudflareAssets.js",
+    "cf:dev": "npm run cf:build && wrangler dev",
+    "cf:deploy": "npm run cf:build && wrangler deploy",
+    "cf:check": "npm run cf:build && wrangler deploy --dry-run"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "wrangler": "^4.125.0"
   }
 }
