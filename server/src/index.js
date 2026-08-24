@@ -1389,6 +1389,7 @@ async function route(request, response) {
     sendJson(response, 200, {
       ok: true,
       service: "neon-studios-system-academy",
+      curriculumSystems: 170,
       authConfigured: isAuthConfigured(),
       learningSyncConfigured: learningStore.available,
       administrationConfigured: adminStore.available,

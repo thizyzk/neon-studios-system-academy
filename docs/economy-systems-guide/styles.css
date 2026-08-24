@@ -1488,6 +1488,61 @@ h3 {
   overflow-wrap: anywhere;
 }
 
+.learning-level-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.learning-level-card {
+  min-height: 250px;
+  position: relative;
+}
+
+.learning-level-card::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: var(--teal);
+  opacity: 0.75;
+}
+
+.learning-level-card.level-2::after {
+  background: var(--blue);
+}
+
+.learning-level-card.level-3::after {
+  background: var(--gold);
+}
+
+.learning-level-card h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.learning-level-card h3 svg {
+  width: 17px;
+  height: 17px;
+  color: var(--teal);
+}
+
+.learning-level-card small {
+  display: grid;
+  gap: 5px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.learning-level-card small strong {
+  color: var(--text);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
 /* Trilha didática aprofundada usada pelos 50 sistemas de integração. */
 .course-deep-dive {
   padding-top: 8px;

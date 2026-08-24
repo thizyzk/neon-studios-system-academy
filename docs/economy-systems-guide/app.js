@@ -1339,6 +1339,7 @@
   });
 
   const integrationBlueprints = window.INTEGRATION_SYSTEM_BLUEPRINTS || [];
+  const expansionBlueprints = window.NEON_SYSTEM_EXPANSION || [];
 
   const integrationModeProfiles = {
     State: {
@@ -1403,7 +1404,10 @@
 
   function buildIntegrationExample(blueprint) {
     const [operationName, targetMethod] = blueprint.operations[0];
-    const requireLine = `local Service = require(ServerScriptService.Services.Integration.${blueprint.tier === "Básico" ? "Basic" : blueprint.tier === "Intermediário" ? "Intermediate" : "Advanced"}.${blueprint.name})`;
+    const serviceFolder = blueprint.folder
+      ? `Academy.${blueprint.folder}`
+      : `Integration.${blueprint.tier === "Básico" ? "Basic" : blueprint.tier === "Intermediário" ? "Intermediate" : "Advanced"}`;
+    const requireLine = `local Service = require(ServerScriptService.Services.${serviceFolder}.${blueprint.name})`;
 
     if (targetMethod === "CreateRecord") {
       return `${requireLine}\n\nlocal created = Service:${operationName}("example-001", {\n    OwnerUserId = player.UserId,\n    Status = "Active",\n})\n\nif not created.Ok then\n    warn(created.Error)\nend`;
@@ -1545,7 +1549,45 @@
     };
   }
 
-  systems.push(...integrationBlueprints.map(createIntegrationSystem));
+  function createExpansionSystem(blueprint, index) {
+    const tierNames = { Basico: "Básico", Intermediario: "Intermediário", Avancado: "Avançado" };
+    const normalizedBlueprint = { ...blueprint, tier: tierNames[blueprint.tier] || blueprint.tier };
+    const system = createIntegrationSystem(normalizedBlueprint, index + integrationBlueprints.length);
+    const primaryOperation = blueprint.operations[0][0];
+
+    system.id = `academy-${blueprint.id}`;
+    system.category = blueprint.domain;
+    system.phase = blueprint.phase;
+    system.source = `../../src/ServerScriptService/Services/Academy/${blueprint.folder}/${blueprint.name}.luau`;
+    system.learningLevels = blueprint.levels;
+    system.stages = blueprint.levels.map((level) => `${level.name}: ${level.goal}`).concat([
+      `Contrato: documentar entradas, retornos e erros de ${primaryOperation}.`,
+      `Segurança: provar que o cliente não altera a fonte de verdade de ${blueprint.name}.`,
+      "Produção: executar os testes de falha, retry, concorrência e recuperação."
+    ]);
+    system.question = `${blueprint.why} Como ${blueprint.name} elimina esse problema sem assumir dados que pertencem a outro serviço?`;
+    system.mentalModel = [
+      `Dor que inicia o projeto: ${blueprint.why}`,
+      `Responsabilidade única: ${blueprint.role}`,
+      `A primeira fronteira é ${primaryOperation}; ela recebe intenção e devolve um resultado de domínio previsível.`,
+      "A progressão Básico → Intermediário → Avançado aumenta confiabilidade e escala sem trocar a fonte de verdade."
+    ];
+    system.course.what = `${blueprint.name} pertence à especialização ${blueprint.domain} e ${blueprint.role.charAt(0).toLocaleLowerCase("pt-BR")}${blueprint.role.slice(1)}`;
+    system.course.exercise = `${blueprint.levels[0].goal} Depois, force uma falha da primeira dependência e implemente ${blueprint.levels[2].goal.charAt(0).toLocaleLowerCase("pt-BR")}${blueprint.levels[2].goal.slice(1)}`;
+    system.course.summary = [
+      `Especialização: ${blueprint.domain}.`,
+      `Operação inicial: ${primaryOperation}.`,
+      `Básico: ${blueprint.levels[0].goal}`,
+      `Intermediário: ${blueprint.levels[1].goal}`,
+      `Avançado: ${blueprint.levels[2].goal}`
+    ];
+    return system;
+  }
+
+  systems.push(
+    ...integrationBlueprints.map(createIntegrationSystem),
+    ...expansionBlueprints.map(createExpansionSystem)
+  );
 
   const roadmap = [
     {
@@ -1627,6 +1669,13 @@
       gate: "Retry possui limite; locks expiram; shutdown drena; rollback atua sobre dados e toda operação distribuída é observável."
     }
   ];
+
+  roadmap.push(...[...new Set(expansionBlueprints.map((item) => item.domain))].map((domain) => ({
+    title: domain,
+    systems: expansionBlueprints.filter((item) => item.domain === domain).map((item) => `academy-${item.id}`),
+    purpose: `Evolua os contratos de ${domain.toLocaleLowerCase("pt-BR")} do protótipo local até uma versão observável e preparada para produção.`,
+    gate: "Cada módulo deve passar pelas provas Básico, Intermediário e Avançado sem confiar no cliente nem duplicar a fonte de verdade."
+  })));
 
   const architecture = [
     { label: "Fundação", ids: ["currency-exchange", "tax", "discount"] },
@@ -3786,6 +3835,29 @@ local scenarios = {
     `;
   }
 
+  function renderLearningLevels(system) {
+    if (!system.learningLevels) return "";
+    const levelIcons = ["blocks", "network", "rocket"];
+    return `
+      <section class="content-section learning-levels" id="learning-levels">
+        <div class="section-heading">
+          <div><div class="eyebrow">Progressão guiada</div><h2>Básico, intermediário e avançado</h2></div>
+          <p>Construa uma camada por vez. A prova de cada nível evita avançar com uma base apenas aparente.</p>
+        </div>
+        <div class="implementation-map learning-level-grid">
+          ${system.learningLevels.map((level, index) => `
+            <article class="implementation-step learning-level-card level-${index + 1}">
+              <span>${String(index + 1).padStart(2, "0")}</span>
+              <h3>${icon(levelIcons[index])} ${level.name}</h3>
+              <p>${level.goal}</p>
+              <small><strong>Prova de conclusão</strong>${level.proof}</small>
+            </article>
+          `).join("")}
+        </div>
+      </section>
+    `;
+  }
+
   function renderSystemDetail(system) {
     const previous = systems[systems.indexOf(system) - 1];
     const next = systems[systems.indexOf(system) + 1];
@@ -3849,6 +3921,8 @@ local scenarios = {
           </section>
         </aside>
       </div>
+
+      ${renderLearningLevels(system)}
 
       <section class="content-section" id="implementation">
         <div class="section-heading">
@@ -4004,7 +4078,7 @@ local scenarios = {
 
   function renderTracks() {
     content.innerHTML = `
-      <header class="page-header"><div><div class="eyebrow">${icon("milestone")} Currículo guiado</div><h1>Trilhas de aprendizado</h1><p class="lead">Sequências menores, com objetivo e ordem clara, para você não estudar setenta sistemas ao mesmo tempo.</p></div></header>
+      <header class="page-header"><div><div class="eyebrow">${icon("milestone")} Currículo guiado</div><h1>Trilhas de aprendizado</h1><p class="lead">Sequências menores, com objetivo e ordem clara, para você não estudar cento e setenta sistemas ao mesmo tempo.</p></div></header>
       <div class="track-grid">${learningTracks.map((track) => {
         const trackSystems = track.systems.map(getSystem).filter(Boolean);
         const done = trackSystems.filter((system) => progress.systems[system.id]).length;

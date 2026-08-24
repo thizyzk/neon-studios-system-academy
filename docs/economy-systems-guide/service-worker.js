@@ -1,4 +1,4 @@
-const CACHE_NAME = "neon-academy-v5";
+const CACHE_NAME = "neon-academy-v6";
 const APP_SHELL = [
   "/",
   "/styles.css",
@@ -10,6 +10,7 @@ const APP_SHELL = [
   "/academy-scene.js",
   "/academy-data.js",
   "/integration-systems.js",
+  "/system-expansion.js",
   "/learning-library.js",
   "/assets/lucide.min.js",
   "/assets/vendor/three.module.min.js",
