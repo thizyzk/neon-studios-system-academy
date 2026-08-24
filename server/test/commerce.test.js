@@ -120,6 +120,21 @@ test("checkout credits energy once across duplicate and asynchronous events", as
   await store.close();
 });
 
+test("checkout without canonical product metadata never grants Plus", async () => {
+  const store = createTestStore();
+  const malformed = energyCheckoutEvent({ eventId: "evt_missing_product" });
+  malformed.data.object.metadata = { user_sub: "google-user-1" };
+
+  await assert.rejects(
+    store.processStripeEvent(malformed),
+    /StripeProductMetadataInvalid/
+  );
+  const account = await store.getAccount({ sub: "google-user-1", email: "learner@example.com" });
+  assert.equal(account.purchasedEnergy, 0);
+  assert.equal(account.plusActive, false);
+  await store.close();
+});
+
 test("partial and full refunds reconcile only the cumulative difference", async () => {
   const store = createTestStore();
   await store.processStripeEvent(energyCheckoutEvent());
@@ -269,7 +284,7 @@ test("Plus follows paid checkout and subscription lifecycle events", async () =>
         id: "sub_plus",
         customer: "cus_plus",
         status: "canceled",
-        metadata: { user_sub: user.sub, product_type: "subscription" },
+        metadata: { user_sub: user.sub, product_id: "plus-monthly", product_type: "subscription" },
       },
     },
   });

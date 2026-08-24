@@ -1250,7 +1250,31 @@ async function handleCommerceEnergyConsume(request, response) {
 }
 
 async function enrichStripeCommerceEvent(event) {
-  const object = event.data.object;
+  let object = event.data.object;
+  const objectId = typeof object === "string" ? object : object?.id;
+  const checkoutEvents = new Set(["checkout.session.completed", "checkout.session.async_payment_succeeded"]);
+  const subscriptionEvents = new Set([
+    "customer.subscription.created",
+    "customer.subscription.updated",
+    "customer.subscription.deleted",
+  ]);
+  const invoiceEvents = new Set(["invoice.paid", "invoice.payment_failed"]);
+  const metadataComplete = (candidate) => Boolean(
+    candidate?.metadata?.user_sub
+    && candidate.metadata.product_id
+    && candidate.metadata.product_type
+  );
+
+  if (objectId && checkoutEvents.has(event.type) && !metadataComplete(object)) {
+    object = await stripe.checkout.sessions.retrieve(objectId);
+    event.data.object = object;
+  } else if (objectId && subscriptionEvents.has(event.type) && !metadataComplete(object)) {
+    object = await stripe.subscriptions.retrieve(objectId);
+    event.data.object = object;
+  } else if (objectId && invoiceEvents.has(event.type)) {
+    object = await stripe.invoices.retrieve(objectId);
+    event.data.object = object;
+  }
   const needsChargeLookup = [
     "charge.dispute.created",
     "charge.dispute.closed",

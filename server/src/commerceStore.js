@@ -1,5 +1,7 @@
 import { Pool } from "pg";
 
+import { findCommerceProduct } from "./commerceCatalog.js";
+
 const CHECKOUT_EVENTS = new Set([
   "checkout.session.completed",
   "checkout.session.async_payment_succeeded",
@@ -107,6 +109,9 @@ export function createCommerceStore(databaseUrl, options = {}) {
           ADD COLUMN IF NOT EXISTS energy_debt BIGINT NOT NULL DEFAULT 0 CHECK (energy_debt >= 0);
         ALTER TABLE academy_commerce_purchases
           ADD COLUMN IF NOT EXISTS debt_energy BIGINT NOT NULL DEFAULT 0 CHECK (debt_energy >= 0);
+        UPDATE academy_commerce_accounts
+        SET plus_active = FALSE, updated_at = NOW()
+        WHERE plus_active = TRUE AND stripe_subscription_id IS NULL;
       `).catch((error) => {
         schemaPromise = null;
         throw error;
@@ -369,16 +374,20 @@ export function createCommerceStore(databaseUrl, options = {}) {
 
         if (CHECKOUT_EVENTS.has(event.type) && userSub) {
           await ensureAccount(client, userSub, object.customer_details?.email || null);
-          if (metadata.product_type === "energy") {
+          const product = findCommerceProduct(metadata.product_id);
+          if (!product || product.type !== metadata.product_type) {
+            throw new Error(`StripeProductMetadataInvalid:${metadata.product_id || "missing"}`);
+          }
+          if (product.type === "energy") {
             const paymentIntentId = stripeId(object.payment_intent);
             const purchase = await upsertEnergyPurchase(client, {
               checkoutSessionId: stripeId(object.id),
               paymentIntentId,
               chargeId: "",
               userSub,
-              productId: metadata.product_id || "unknown-energy",
+              productId: product.id,
               productType: "energy",
-              energy: positiveInteger(metadata.energy),
+              energy: product.energy,
               amountCents: positiveInteger(object.amount_total),
               currency: String(object.currency || "brl"),
               status: object.payment_status === "paid" ? "paid" : "pending",
@@ -386,7 +395,7 @@ export function createCommerceStore(databaseUrl, options = {}) {
             if (object.payment_status === "paid") {
               await creditEnergyPurchase(client, purchase, customerId, object.customer_details?.email || null);
             }
-          } else if (metadata.product_type === "subscription" && object.payment_status !== "unpaid") {
+          } else if (product.id === "plus-monthly" && object.payment_status !== "unpaid") {
             await client.query(`
               UPDATE academy_commerce_accounts
               SET plus_active = TRUE,
@@ -399,6 +408,9 @@ export function createCommerceStore(databaseUrl, options = {}) {
         }
 
         if (SUBSCRIPTION_EVENTS.has(event.type) && userSub) {
+          if (metadata.product_type !== "subscription" || metadata.product_id !== "plus-monthly") {
+            throw new Error("StripeSubscriptionMetadataInvalid");
+          }
           await ensureAccount(client, userSub);
           const plusActive = event.type !== "customer.subscription.deleted"
             && ["active", "trialing"].includes(object.status);
@@ -413,6 +425,9 @@ export function createCommerceStore(databaseUrl, options = {}) {
         }
 
         if (INVOICE_EVENTS.has(event.type) && userSub) {
+          if (metadata.product_type !== "subscription" || metadata.product_id !== "plus-monthly") {
+            throw new Error("StripeInvoiceMetadataInvalid");
+          }
           await ensureAccount(client, userSub);
           const plusActive = event.type === "invoice.paid";
           const subscriptionId = stripeId(object.parent?.subscription_details?.subscription)
