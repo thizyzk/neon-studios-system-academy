@@ -29,6 +29,7 @@ const MAX_AUDIO_METADATA_BODY_BYTES = 16 * 1024;
 const PEXELS_CACHE_TTL_MS = 15 * 60 * 1000;
 const PEXELS_RATE_WINDOW_MS = 60 * 60 * 1000;
 const PEXELS_RATE_MAX = 20;
+const AUTH_ACCESS_CACHE_TTL_MS = 5 * 1000;
 const authRateLimitWindowMs = config.authRateLimitWindowSeconds * 1000;
 const googleClient = config.googleClientId ? new OAuth2Client(config.googleClientId) : null;
 const authAttempts = new Map();
@@ -47,6 +48,7 @@ const pexelsCache = new Map();
 const pexelsRateLimits = new Map();
 const checkoutRateLimits = new Map();
 const stripePriceCache = new Map();
+const validatedAccessCache = new Map();
 
 const contentTypes = new Map([
   [".css", "text/css; charset=utf-8"],
@@ -217,6 +219,43 @@ function getAuthSession(request) {
   return verifySignedSession(getCookie(request, config.authCookieName), config.authSessionSecret);
 }
 
+function cacheValidatedAccess(access) {
+  if (!access?.sub) return access;
+  validatedAccessCache.set(access.sub, {
+    access,
+    sessionVersion: Number(access.sessionVersion || 0),
+    expiresAt: Date.now() + AUTH_ACCESS_CACHE_TTL_MS,
+  });
+  if (validatedAccessCache.size > 500) {
+    const now = Date.now();
+    for (const [sub, entry] of validatedAccessCache) {
+      if (entry.expiresAt <= now) validatedAccessCache.delete(sub);
+    }
+  }
+  return access;
+}
+
+async function getCachedAccessState(user) {
+  const sessionVersion = Number(user.sessionVersion || 0);
+  const cached = validatedAccessCache.get(user.sub);
+  if (cached?.sessionVersion === sessionVersion && cached.expiresAt > Date.now()) {
+    return cached.promise ? cached.promise : cached.access;
+  }
+
+  const promise = adminStore.getAccessState(user);
+  validatedAccessCache.set(user.sub, {
+    promise,
+    sessionVersion,
+    expiresAt: Date.now() + AUTH_ACCESS_CACHE_TTL_MS,
+  });
+  try {
+    return cacheValidatedAccess(await promise);
+  } catch (error) {
+    if (validatedAccessCache.get(user.sub)?.promise === promise) validatedAccessCache.delete(user.sub);
+    throw error;
+  }
+}
+
 function isCurrentlyBanned(access) {
   return Boolean(access?.bannedUntil && new Date(access.bannedUntil).getTime() > Date.now());
 }
@@ -224,7 +263,7 @@ function isCurrentlyBanned(access) {
 async function getValidatedAuthSession(request) {
   const session = getAuthSession(request);
   if (!session) return null;
-  const access = await adminStore.getAccessState(session.user);
+  const access = await getCachedAccessState(session.user);
   if (!access || isCurrentlyBanned(access) || access.sessionVersion !== session.user.sessionVersion) return null;
   return {
     ...session,
@@ -760,7 +799,16 @@ async function handleGoogleAuth(request, response) {
 
   try {
     const body = await readJsonBody(request);
-    const captchaResult = await verifyRecaptcha(body.captchaToken, attempt.ip);
+    const verificationStartedAt = Date.now();
+    const [captchaVerification, googleVerification] = await Promise.allSettled([
+      verifyRecaptcha(body.captchaToken, attempt.ip),
+      verifyGoogleCredential(body.credential),
+    ]);
+    const verificationDurationMs = Date.now() - verificationStartedAt;
+    response.setHeader("Server-Timing", `identity;dur=${verificationDurationMs}`);
+    const captchaResult = captchaVerification.status === "fulfilled"
+      ? captchaVerification.value
+      : { ok: false, reason: "CaptchaVerificationUnavailable" };
     if (!captchaResult.ok) {
       console.warn(
         JSON.stringify({
@@ -782,7 +830,8 @@ async function handleGoogleAuth(request, response) {
       return;
     }
 
-    const user = await verifyGoogleCredential(body.credential);
+    if (googleVerification.status === "rejected") throw googleVerification.reason;
+    const user = googleVerification.value;
     if (!user) {
       sendJson(response, 401, { ok: false, error: "GoogleAccountRejected" });
       return;
@@ -812,13 +861,20 @@ async function handleGoogleAuth(request, response) {
       isAdmin: access.isAdmin,
       sessionVersion: access.sessionVersion,
     };
+    cacheValidatedAccess({ ...access, ...trustedUser });
     const session = createSignedSession(trustedUser, config.authSessionSecret, config.authSessionMaxAgeSeconds);
     authAttempts.delete(attempt.ip);
     response.setHeader("Set-Cookie", createAuthCookie(session.token));
+    response.setHeader(
+      "Server-Timing",
+      `identity;dur=${verificationDurationMs}, storage;dur=${Math.max(0, Date.now() - verificationStartedAt - verificationDurationMs)}`
+    );
     console.log(JSON.stringify({
       event: "auth_succeeded",
       requestId,
       role: trustedUser.role,
+      verificationDurationMs,
+      storageDurationMs: Date.now() - verificationStartedAt - verificationDurationMs,
       durationMs: Date.now() - startedAt,
     }));
     sendJson(response, 200, { ok: true, user: trustedUser, requestId });
@@ -952,8 +1008,6 @@ function publicCatalog() {
 }
 
 async function handleCommerceCatalog(request, response) {
-  const session = await requireAuthSession(request, response);
-  if (!session) return;
   sendJson(response, 200, {
     ok: true,
     products: publicCatalog(),
@@ -1406,6 +1460,10 @@ async function handleAdminUserAction(request, response, targetSub) {
     return;
   }
 
+  if (["ban", "unban", "revoke_sessions", "set_role"].includes(action)) {
+    validatedAccessCache.delete(targetSub);
+  }
+
   await adminStore.writeAudit(session.user, action, targetSub, {
     role: action === "set_role" ? updated.role : undefined,
     durationHours: action === "ban" ? Number.parseInt(body.durationHours || "24", 10) : undefined,
@@ -1441,6 +1499,17 @@ function validAudioId(value) {
 async function handleTutorAudioConfig(request, response) {
   const session = await requireAuthSession(request, response);
   if (!session) return;
+  if (!isTutorAudioConfigured()) {
+    sendJson(response, 200, {
+      ok: true,
+      available: false,
+      maxBytes: 3 * 1024 * 1024,
+      maxDurationMs: 60 * 1000,
+      maxDaily: 10,
+      retentionDays: config.r2AudioRetentionDays,
+    });
+    return;
+  }
   const limits = await getTutorAudioLimits(session.user);
   sendJson(response, 200, {
     ok: true,

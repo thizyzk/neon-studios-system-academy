@@ -63,12 +63,22 @@
     if (document.getElementById(id)) return Promise.resolve();
     return new Promise((resolve, reject) => {
       const script = document.createElement("script");
+      const timeout = setTimeout(() => {
+        script.remove();
+        reject(new Error(`Tempo excedido ao carregar ${id}.`));
+      }, 12000);
       script.id = id;
       script.src = src;
       script.async = true;
       script.defer = true;
-      script.addEventListener("load", resolve, { once: true });
-      script.addEventListener("error", () => reject(new Error(`Falha ao carregar ${id}.`)), { once: true });
+      script.addEventListener("load", () => {
+        clearTimeout(timeout);
+        resolve();
+      }, { once: true });
+      script.addEventListener("error", () => {
+        clearTimeout(timeout);
+        reject(new Error(`Falha ao carregar ${id}.`));
+      }, { once: true });
       document.head.appendChild(script);
     });
   }
@@ -214,7 +224,7 @@
     refreshIcons();
 
     try {
-      const configResponse = await fetch("/api/auth/config", { cache: "no-store" });
+      const configResponse = await fetchWithTimeout("/api/auth/config", { cache: "no-store" }, 8000);
       const config = await configResponse.json();
       if (!config.configured) {
         captchaSlot.replaceChildren();
@@ -279,4 +289,12 @@
   }
 
   initialize();
+  window.addEventListener("load", () => {
+    const loadScene = () => import("./academy-scene.js").catch(() => {});
+    if ("requestIdleCallback" in window) {
+      window.requestIdleCallback(loadScene, { timeout: 2500 });
+    } else {
+      setTimeout(loadScene, 500);
+    }
+  }, { once: true });
 })();

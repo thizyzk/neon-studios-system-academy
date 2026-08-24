@@ -4467,28 +4467,44 @@ local scenarios = {
 
   async function loadCommerceState() {
     if (window.location.protocol === "file:") return;
+    const checkoutSessionId = new URLSearchParams(window.location.search).get("session_id") || "";
+    const catalogRequest = fetch("/api/commerce/catalog", { credentials: "same-origin", cache: "no-store" });
+    const secondaryRequests = [
+      fetch("/api/commerce/account", { credentials: "same-origin", cache: "no-store" }),
+      fetch("/api/commerce/ledger", { credentials: "same-origin", cache: "no-store" }),
+      fetch("/api/tutor/audio/config", { credentials: "same-origin", cache: "no-store" }),
+      checkoutSessionId
+        ? fetch(`/api/commerce/session?sessionId=${encodeURIComponent(checkoutSessionId)}`, { credentials: "same-origin", cache: "no-store" })
+        : Promise.resolve(null),
+    ];
+
     try {
-      const checkoutSessionId = new URLSearchParams(window.location.search).get("session_id") || "";
-      const [catalogResponse, accountResponse, ledgerResponse, audioResponse, checkoutResponse] = await Promise.all([
-        fetch("/api/commerce/catalog", { credentials: "same-origin", cache: "no-store" }),
-        fetch("/api/commerce/account", { credentials: "same-origin", cache: "no-store" }),
-        fetch("/api/commerce/ledger", { credentials: "same-origin", cache: "no-store" }),
-        fetch("/api/tutor/audio/config", { credentials: "same-origin", cache: "no-store" }),
-        checkoutSessionId
-          ? fetch(`/api/commerce/session?sessionId=${encodeURIComponent(checkoutSessionId)}`, { credentials: "same-origin", cache: "no-store" })
-          : Promise.resolve(null),
-      ]);
+      const catalogResponse = await catalogRequest;
       if (catalogResponse.ok) {
         const catalogPayload = await catalogResponse.json();
         commerceCatalog = catalogPayload.products || [];
         checkoutAvailable = catalogPayload.checkoutAvailable === true;
         promotionVerified = catalogPayload.promotionVerified === true;
       }
-      if (ledgerResponse.ok) {
+    } catch (_error) {
+      // Account state can still load if the public catalog request is interrupted.
+    }
+
+    updateProgressUI();
+    if (currentRoute().startsWith("store")) render();
+
+    const [accountResult, ledgerResult, audioResult, checkoutResult] = await Promise.allSettled(secondaryRequests);
+    const accountResponse = accountResult.status === "fulfilled" ? accountResult.value : null;
+    const ledgerResponse = ledgerResult.status === "fulfilled" ? ledgerResult.value : null;
+    const audioResponse = audioResult.status === "fulfilled" ? audioResult.value : null;
+    const checkoutResponse = checkoutResult.status === "fulfilled" ? checkoutResult.value : null;
+
+    try {
+      if (ledgerResponse?.ok) {
         const ledgerPayload = await ledgerResponse.json();
         commerceLedger = Array.isArray(ledgerPayload.entries) ? ledgerPayload.entries : [];
       }
-      if (accountResponse.ok) {
+      if (accountResponse?.ok) {
         const accountPayload = await accountResponse.json();
         commerceAccount = {
           available: accountPayload.available === true,
@@ -4497,7 +4513,7 @@ local scenarios = {
           plusActive: accountPayload.plusActive === true,
         };
       }
-      if (audioResponse.ok) {
+      if (audioResponse?.ok) {
         const audioPayload = await audioResponse.json();
         tutorAudioConfig = {
           available: audioPayload.available === true,
@@ -4533,6 +4549,7 @@ local scenarios = {
       commerceLedger = [];
       tutorAudioConfig.available = false;
       window.NeonThemeStudio?.enforceEntitlement(false);
+      if (currentRoute().startsWith("store")) render();
     }
   }
 
