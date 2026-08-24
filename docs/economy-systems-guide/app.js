@@ -5970,7 +5970,10 @@ local scenarios = {
   applyVisualSettings();
   startAmbientPointer();
   async function bootstrapAcademy() {
-    const canContinue = await initializeAuthControls();
+    const authInitialization = initializeAuthControls();
+    renderSystemNav();
+    render();
+    const canContinue = await authInitialization;
     if (!canContinue) return;
     renderSystemNav();
     render();

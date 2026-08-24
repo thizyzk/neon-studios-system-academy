@@ -214,15 +214,6 @@
     refreshIcons();
 
     try {
-      const sessionResponse = await fetchWithTimeout("/api/auth/session", {
-        credentials: "same-origin",
-        cache: "no-store",
-      }, 12000);
-      if (sessionResponse.ok) {
-        window.location.replace("/");
-        return;
-      }
-
       const configResponse = await fetch("/api/auth/config", { cache: "no-store" });
       const config = await configResponse.json();
       if (!config.configured) {

@@ -113,14 +113,6 @@ async function serveAsset(request, env, assetPath) {
   return withSecurityHeaders(response, requestUrl, assetPath);
 }
 
-async function getSessionResponse(request) {
-  const sessionUrl = new URL("/api/auth/session", request.url);
-  return backend.fetch(new Request(sessionUrl, {
-    method: "GET",
-    headers: request.headers,
-  }));
-}
-
 export default {
   async fetch(request, env, context) {
     const requestUrl = new URL(request.url);
@@ -131,8 +123,7 @@ export default {
     }
 
     if (pathname === "/login") {
-      const sessionResponse = await getSessionResponse(request);
-      if (sessionResponse.ok) return redirect("/", requestUrl);
+      if (hasSignedSession(request, requestUrl)) return redirect("/", requestUrl);
       return serveAsset(request, env, "/login.html");
     }
 
