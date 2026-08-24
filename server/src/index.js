@@ -939,6 +939,34 @@ async function handleCommerceLedger(request, response) {
   sendJson(response, 200, { ok: true, available: true, entries: await commerceStore.listLedger(session.user, 30) });
 }
 
+async function handleCommerceSession(request, response, requestUrl) {
+  const session = await requireAuthSession(request, response);
+  if (!session) return;
+  if (!stripe) {
+    sendJson(response, 503, { ok: false, error: "CheckoutUnavailable" });
+    return;
+  }
+  const sessionId = requestUrl.searchParams.get("sessionId") || "";
+  if (!/^cs_(?:test_|live_)?[a-zA-Z0-9]{20,}$/.test(sessionId)) {
+    sendJson(response, 400, { ok: false, error: "InvalidCheckoutSession" });
+    return;
+  }
+  const checkout = await stripe.checkout.sessions.retrieve(sessionId);
+  if (checkout.client_reference_id !== session.user.sub) {
+    sendJson(response, 404, { ok: false, error: "CheckoutSessionNotFound" });
+    return;
+  }
+  const confirmed = checkout.status === "complete"
+    && ["paid", "no_payment_required"].includes(checkout.payment_status);
+  sendJson(response, 200, {
+    ok: true,
+    confirmed,
+    status: checkout.status,
+    paymentStatus: checkout.payment_status,
+    productId: checkout.metadata?.product_id || "",
+  });
+}
+
 async function handleCommerceCheckout(request, response) {
   const session = await requireAuthSession(request, response);
   if (!session) return;
@@ -993,7 +1021,7 @@ async function handleCommerceCheckout(request, response) {
     consent_collection: { terms_of_service: "required" },
     allow_promotion_codes: config.stripeAllowPromotionCodes,
     automatic_tax: { enabled: config.stripeAutomaticTax },
-    success_url: `${config.publicBaseUrl}/#store/success`,
+    success_url: `${config.publicBaseUrl}/?checkout=success&session_id={CHECKOUT_SESSION_ID}#store/success`,
     cancel_url: `${config.publicBaseUrl}/#store`,
   }, { idempotencyKey });
   sendJson(response, 200, { ok: true, checkoutUrl: checkout.url });
@@ -1518,6 +1546,11 @@ async function route(request, response) {
 
   if (request.method === "GET" && requestUrl.pathname === "/api/commerce/ledger") {
     await handleCommerceLedger(request, response);
+    return;
+  }
+
+  if (request.method === "GET" && requestUrl.pathname === "/api/commerce/session") {
+    await handleCommerceSession(request, response, requestUrl);
     return;
   }
 

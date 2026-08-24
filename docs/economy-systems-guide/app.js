@@ -2790,6 +2790,7 @@ local scenarios = {
   let commerceLedger = [];
   let checkoutAvailable = false;
   let promotionVerified = false;
+  let checkoutReturn = { checked: false, confirmed: false, paymentStatus: "", productId: "" };
   let purchaseRefreshAttempts = 0;
   let tutorAudioConfig = { available: false, maxBytes: 0, maxDurationMs: 0, maxDaily: 0, retentionDays: 0 };
   let tutorAudioRecorder = null;
@@ -4382,7 +4383,7 @@ local scenarios = {
     const sourceLabels = { stripe_checkout: "Compra Stripe", "charge.refunded": "Reembolso", "charge.dispute.created": "Contestação" };
     content.innerHTML = `
       <header class="page-header"><div><div class="eyebrow">${icon("gem")} Neon Academy</div><h1>Plus e Cubic Energy</h1><p class="lead">Expanda sua rotina de estudo sem misturar compras com o progresso pedagógico.</p></div></header>
-      ${success ? `<div class="purchase-return ${recentStripeCredit || commerceAccount.plusActive ? "confirmed" : "pending"}">${icon(recentStripeCredit || commerceAccount.plusActive ? "badge-check" : "loader-circle")}<div><strong>${recentStripeCredit || commerceAccount.plusActive ? "Pagamento confirmado" : "Aguardando confirmação assinada"}</strong><span>${recentStripeCredit || commerceAccount.plusActive ? "O benefício já está vinculado à sua conta." : "Não feche esta página. O Stripe pode levar alguns segundos para enviar o webhook."}</span></div></div>` : ""}
+      ${success ? `<div class="purchase-return ${checkoutReturn.confirmed ? "confirmed" : "pending"}">${icon(checkoutReturn.confirmed ? "badge-check" : "loader-circle")}<div><strong>${checkoutReturn.confirmed ? "Pagamento confirmado pelo Stripe" : "Aguardando confirmação assinada"}</strong><span>${checkoutReturn.confirmed ? "A compra é válida. O benefício será refletido assim que o webhook terminar o processamento." : "Não feche esta página. A validação pode levar alguns segundos."}</span></div></div>` : ""}
       ${!checkoutAvailable ? `<section class="store-availability">${icon("construction")}<div><strong>Loja em configuração</strong><p>Compras permanecem bloqueadas até banco, Price IDs e webhook Stripe estarem validados no servidor.</p></div></section>` : ""}
       <section class="plus-offer"><div class="plus-mark">${icon("infinity")}</div><div><span>Assinatura mensal</span><h2>Neon Academy Plus</h2><p>Energia infinita, histórico maior do tutor e personalização completa da Academy.</p><ul><li>${icon("check")} Energia infinita nas Áreas</li><li>${icon("check")} Conversas maiores com o tutor</li><li>${icon("palette")} Temas Plus, fundos locais e busca Pexels quando configurada</li></ul></div><div class="plus-price"><span>${commerceAccount.plusActive ? "Plano ativo" : "Por mês"}</span><strong>${plus ? formatBRL(plus.amountCents) : "R$ 99,90"}</strong><button class="button primary" type="button" data-buy-product="plus-monthly" ${!checkoutAvailable || commerceAccount.plusActive ? "disabled" : ""}>${commerceAccount.plusActive ? "Plus ativo" : checkoutAvailable ? "Assinar Plus" : "Checkout em configuração"}</button></div></section>
       <section class="content-section"><div class="section-heading"><div><div class="eyebrow">Pacotes avulsos</div><h2>Cubic Energy</h2></div><p>Energia comprada nunca é removida por Renascimento.</p></div><div class="energy-store-grid">${energyProducts.length ? energyProducts.map((product) => `<article class="energy-product"><div>${icon("box")}<span>${product.energy}</span></div><h3>Cubic Energy</h3>${product.compareAtCents ? `<del>${formatBRL(product.compareAtCents)}</del>` : ""}<strong>${formatBRL(product.amountCents)}</strong><button class="button" type="button" data-buy-product="${product.id}" ${checkoutAvailable ? "" : "disabled"}>${checkoutAvailable ? "Comprar" : "Indisponível"}</button></article>`).join("") : '<div class="empty-state">Carregando catálogo seguro...</div>'}</div></section>
@@ -4455,11 +4456,15 @@ local scenarios = {
   async function loadCommerceState() {
     if (window.location.protocol === "file:") return;
     try {
-      const [catalogResponse, accountResponse, ledgerResponse, audioResponse] = await Promise.all([
+      const checkoutSessionId = new URLSearchParams(window.location.search).get("session_id") || "";
+      const [catalogResponse, accountResponse, ledgerResponse, audioResponse, checkoutResponse] = await Promise.all([
         fetch("/api/commerce/catalog", { credentials: "same-origin", cache: "no-store" }),
         fetch("/api/commerce/account", { credentials: "same-origin", cache: "no-store" }),
         fetch("/api/commerce/ledger", { credentials: "same-origin", cache: "no-store" }),
         fetch("/api/tutor/audio/config", { credentials: "same-origin", cache: "no-store" }),
+        checkoutSessionId
+          ? fetch(`/api/commerce/session?sessionId=${encodeURIComponent(checkoutSessionId)}`, { credentials: "same-origin", cache: "no-store" })
+          : Promise.resolve(null),
       ]);
       if (catalogResponse.ok) {
         const catalogPayload = await catalogResponse.json();
@@ -4488,6 +4493,18 @@ local scenarios = {
           maxDaily: Number(audioPayload.maxDaily) || 0,
           retentionDays: Number(audioPayload.retentionDays) || 0,
         };
+      }
+      if (checkoutResponse) {
+        checkoutReturn.checked = true;
+        if (checkoutResponse.ok) {
+          const checkoutPayload = await checkoutResponse.json();
+          checkoutReturn = {
+            checked: true,
+            confirmed: checkoutPayload.confirmed === true,
+            paymentStatus: checkoutPayload.paymentStatus || "",
+            productId: checkoutPayload.productId || "",
+          };
+        }
       }
       updateProgressUI();
       window.NeonThemeStudio?.enforceEntitlement(commerceAccount.plusActive);
