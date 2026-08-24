@@ -77,6 +77,7 @@ export function readConfig() {
     r2AudioRetentionDays: Math.min(365, Math.max(1, Number.parseInt(process.env.R2_AUDIO_RETENTION_DAYS ?? "30", 10) || 30)),
     stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? "",
     stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
+    pexelsApiKey: process.env.PEXELS_API_KEY ?? "",
     communityEnabled: process.env.COMMUNITY_ENABLED === "true",
     tiktokClientKey: process.env.TIKTOK_CLIENT_KEY ?? "",
     tiktokClientSecret: process.env.TIKTOK_CLIENT_SECRET ?? "",

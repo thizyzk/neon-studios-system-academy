@@ -130,6 +130,8 @@
           GoogleAccountRejected: "Esta conta Google não foi aceita para este site.",
           TooManyAuthAttempts: "Muitas tentativas. Aguarde alguns minutos.",
           InvalidOrigin: "O domínio atual não está autorizado.",
+          AccountSuspended: "Esta conta está temporariamente suspensa.",
+          AuthStorageUnavailable: "O banco de autenticação está indisponível. Tente novamente em instantes.",
         };
         const captchaMessages = {
           CaptchaHostnameMismatch: "Este endereço não está autorizado na configuração do reCAPTCHA.",

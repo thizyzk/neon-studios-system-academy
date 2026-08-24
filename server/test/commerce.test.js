@@ -25,6 +25,7 @@ test("commerce store fails closed without a durable database", async () => {
   assert.equal(await store.getAccount({ sub: "user" }), null);
   assert.equal(await store.getStripeCustomerId({ sub: "user" }), null);
   assert.deepEqual(await store.consumeEnergy({ sub: "user" }, 1, "test"), { ok: false, error: "unavailable" });
+  assert.deepEqual(await store.adminAdjustEnergy({ sub: "user" }, 50, "admin"), { ok: false, error: "unavailable" });
   assert.deepEqual(await store.processStripeEvent({}), { processed: false, reason: "unavailable" });
   await store.close();
 });

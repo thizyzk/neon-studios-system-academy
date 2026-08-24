@@ -7,6 +7,7 @@ import { URL } from "node:url";
 import { OAuth2Client } from "google-auth-library";
 import Stripe from "stripe";
 
+import { ADMIN_ROLES, createAdminStore, hasAdminPermission, normalizeAdminRole } from "./adminStore.js";
 import { COMMERCE_CATALOG, findCommerceProduct } from "./commerceCatalog.js";
 import { createCommerceStore } from "./commerceStore.js";
 import { readConfig } from "./config.js";
@@ -24,14 +25,20 @@ const MAX_AUTH_BODY_BYTES = 20 * 1024;
 const MAX_LEARNING_PROFILE_BODY_BYTES = 600 * 1024;
 const MAX_COMMERCE_BODY_BYTES = 64 * 1024;
 const MAX_AUDIO_METADATA_BODY_BYTES = 16 * 1024;
+const PEXELS_CACHE_TTL_MS = 15 * 60 * 1000;
+const PEXELS_RATE_WINDOW_MS = 60 * 60 * 1000;
+const PEXELS_RATE_MAX = 20;
 const authRateLimitWindowMs = config.authRateLimitWindowSeconds * 1000;
 const googleClient = config.googleClientId ? new OAuth2Client(config.googleClientId) : null;
 const authAttempts = new Map();
 const learningStore = createLearningStore(config.databaseUrl);
 const commerceStore = createCommerceStore(config.databaseUrl);
+const adminStore = createAdminStore(config.databaseUrl, config.adminEmails);
 const tutorAudioStore = createTutorAudioStore(config.databaseUrl);
 const r2AudioStorage = createR2AudioStorage(config);
 const stripe = config.stripeSecretKey ? new Stripe(config.stripeSecretKey) : null;
+const pexelsCache = new Map();
+const pexelsRateLimits = new Map();
 
 const contentTypes = new Map([
   [".css", "text/css; charset=utf-8"],
@@ -46,6 +53,7 @@ const contentTypes = new Map([
   [".svg", "image/svg+xml"],
   [".webp", "image/webp"],
   [".woff2", "font/woff2"],
+  [".wasm", "application/wasm"],
 ]);
 
 let reelCache = {
@@ -53,26 +61,28 @@ let reelCache = {
   payload: null,
 };
 
-function applySecurityHeaders(response) {
+function applySecurityHeaders(response, request) {
   const r2Origin = r2AudioStorage.endpointOrigin;
+  const isEmbeddedLuau = String(request?.url || "").startsWith("/luau/");
   response.setHeader("Content-Security-Policy", [
     "default-src 'self'",
-    "script-src 'self' https://accounts.google.com https://www.google.com https://www.gstatic.com",
+    `script-src 'self'${isEmbeddedLuau ? " 'wasm-unsafe-eval'" : ""} https://accounts.google.com https://www.google.com https://www.gstatic.com`,
     "style-src 'self' 'unsafe-inline' https://accounts.google.com",
-    "frame-src https://accounts.google.com https://www.google.com https://recaptcha.google.com https://play.luau.org",
-    `connect-src 'self' https://accounts.google.com https://www.google.com${r2Origin ? ` ${r2Origin}` : ""}`,
-    `media-src 'self' blob:${r2Origin ? ` ${r2Origin}` : ""}`,
-    "img-src 'self' data: https://lh3.googleusercontent.com https://*.googleusercontent.com",
+    "frame-src 'self' https://accounts.google.com https://www.google.com https://recaptcha.google.com https://play.luau.org",
+    "worker-src 'self' blob:",
+    `connect-src 'self' https://accounts.google.com https://www.google.com${isEmbeddedLuau ? " https://clientsettingscdn.roblox.com" : ""}${r2Origin ? ` ${r2Origin}` : ""}`,
+    `media-src 'self' blob: https://videos.pexels.com${r2Origin ? ` ${r2Origin}` : ""}`,
+    "img-src 'self' data: blob: https://lh3.googleusercontent.com https://*.googleusercontent.com https://images.pexels.com",
     "font-src 'self' data:",
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
-    "frame-ancestors 'none'",
+    `frame-ancestors ${isEmbeddedLuau ? "'self'" : "'none'"}`,
   ].join("; "));
   response.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
   response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   response.setHeader("X-Content-Type-Options", "nosniff");
-  response.setHeader("X-Frame-Options", "DENY");
+  response.setHeader("X-Frame-Options", isEmbeddedLuau ? "SAMEORIGIN" : "DENY");
   response.setHeader("Permissions-Policy", "camera=(), microphone=(self), geolocation=()");
 }
 
@@ -162,6 +172,26 @@ function clearAuthCookie() {
 
 function getAuthSession(request) {
   return verifySignedSession(getCookie(request, config.authCookieName), config.authSessionSecret);
+}
+
+function isCurrentlyBanned(access) {
+  return Boolean(access?.bannedUntil && new Date(access.bannedUntil).getTime() > Date.now());
+}
+
+async function getValidatedAuthSession(request) {
+  const session = getAuthSession(request);
+  if (!session) return null;
+  const access = await adminStore.getAccessState(session.user);
+  if (!access || isCurrentlyBanned(access) || access.sessionVersion !== session.user.sessionVersion) return null;
+  return {
+    ...session,
+    user: {
+      ...session.user,
+      role: access.role,
+      isAdmin: access.isAdmin,
+      sessionVersion: access.sessionVersion,
+    },
+  };
 }
 
 function consumeAuthAttempt(request) {
@@ -698,10 +728,28 @@ async function handleGoogleAuth(request, response) {
       return;
     }
 
-    const session = createSignedSession(user, config.authSessionSecret, config.authSessionMaxAgeSeconds);
+    let access;
+    try {
+      access = await adminStore.recordLogin(user);
+    } catch (error) {
+      console.error("Administration identity store is unavailable.", error.message);
+      sendJson(response, 503, { ok: false, error: "AuthStorageUnavailable" });
+      return;
+    }
+    if (isCurrentlyBanned(access)) {
+      sendJson(response, 403, { ok: false, error: "AccountSuspended" });
+      return;
+    }
+    const trustedUser = {
+      ...user,
+      role: access.role,
+      isAdmin: access.isAdmin,
+      sessionVersion: access.sessionVersion,
+    };
+    const session = createSignedSession(trustedUser, config.authSessionSecret, config.authSessionMaxAgeSeconds);
     authAttempts.delete(attempt.ip);
     response.setHeader("Set-Cookie", createAuthCookie(session.token));
-    sendJson(response, 200, { ok: true, user });
+    sendJson(response, 200, { ok: true, user: trustedUser });
   } catch (error) {
     console.warn("Google authentication failed.", error.message);
     sendJson(response, error.statusCode ?? 401, {
@@ -712,8 +760,9 @@ async function handleGoogleAuth(request, response) {
 }
 
 async function handleAuthSession(request, response) {
-  const session = await getAuthSession(request);
+  const session = await getValidatedAuthSession(request);
   if (!session) {
+    response.setHeader("Set-Cookie", clearAuthCookie());
     sendJson(response, 401, { ok: false, authenticated: false });
     return;
   }
@@ -737,9 +786,20 @@ async function handleAuthLogout(request, response) {
 }
 
 async function requireAuthSession(request, response) {
-  const session = await getAuthSession(request);
+  const session = await getValidatedAuthSession(request);
   if (!session) {
+    response.setHeader("Set-Cookie", clearAuthCookie());
     sendJson(response, 401, { ok: false, error: "Unauthorized" });
+    return null;
+  }
+  return session;
+}
+
+async function requireAdminSession(request, response, permission) {
+  const session = await requireAuthSession(request, response);
+  if (!session) return null;
+  if (!hasAdminPermission(session.user.role, permission)) {
+    sendJson(response, 403, { ok: false, error: "Forbidden" });
     return null;
   }
   return session;
@@ -943,6 +1003,238 @@ async function handleCommunityStatus(request, response) {
   });
 }
 
+function consumePexelsSearch(userSub) {
+  const now = Date.now();
+  const recent = (pexelsRateLimits.get(userSub) ?? []).filter((timestamp) => now - timestamp < PEXELS_RATE_WINDOW_MS);
+  if (recent.length >= PEXELS_RATE_MAX) {
+    return { allowed: false, retryAfterSeconds: Math.ceil((PEXELS_RATE_WINDOW_MS - (now - recent[0])) / 1000) };
+  }
+  recent.push(now);
+  pexelsRateLimits.set(userSub, recent);
+  return { allowed: true, retryAfterSeconds: 0 };
+}
+
+function selectPexelsVideoFile(video) {
+  const files = Array.isArray(video.video_files) ? video.video_files : [];
+  return files
+    .filter((file) => file.file_type === "video/mp4" && typeof file.link === "string" && file.link.startsWith("https://"))
+    .sort((left, right) => {
+      const leftScore = Math.abs((left.width || 0) - 1280) + (left.quality === "hd" ? 0 : 1000);
+      const rightScore = Math.abs((right.width || 0) - 1280) + (right.quality === "hd" ? 0 : 1000);
+      return leftScore - rightScore;
+    })[0];
+}
+
+function normalizePexelsItems(type, payload) {
+  if (type === "photo") {
+    return (Array.isArray(payload.photos) ? payload.photos : []).slice(0, 8).map((photo) => ({
+      id: `photo-${photo.id}`,
+      type: "photo",
+      previewUrl: photo.src?.medium || photo.src?.landscape || "",
+      mediaUrl: photo.src?.large2x || photo.src?.large || photo.src?.landscape || "",
+      creatorName: String(photo.photographer || "Pexels creator").slice(0, 120),
+      creatorUrl: String(photo.photographer_url || "https://www.pexels.com").slice(0, 500),
+      pexelsUrl: String(photo.url || "https://www.pexels.com").slice(0, 500),
+    })).filter((item) => item.previewUrl && item.mediaUrl);
+  }
+  return (Array.isArray(payload.videos) ? payload.videos : []).slice(0, 8).map((video) => {
+    const file = selectPexelsVideoFile(video);
+    return {
+      id: `video-${video.id}`,
+      type: "video",
+      previewUrl: String(file?.link || ""),
+      mediaUrl: String(file?.link || ""),
+      creatorName: String(video.user?.name || "Pexels creator").slice(0, 120),
+      creatorUrl: String(video.user?.url || "https://www.pexels.com").slice(0, 500),
+      pexelsUrl: String(video.url || "https://www.pexels.com").slice(0, 500),
+    };
+  }).filter((item) => item.previewUrl && item.mediaUrl);
+}
+
+async function handlePexelsSearch(request, response, requestUrl) {
+  const session = await requireAuthSession(request, response);
+  if (!session) return;
+  if (!config.pexelsApiKey) {
+    sendJson(response, 503, { ok: false, error: "PexelsUnavailable" });
+    return;
+  }
+  if (!commerceStore.available) {
+    sendJson(response, 403, { ok: false, error: "PlusRequired" });
+    return;
+  }
+  const account = await commerceStore.getAccount(session.user);
+  if (account?.plusActive !== true) {
+    sendJson(response, 403, { ok: false, error: "PlusRequired" });
+    return;
+  }
+  const type = requestUrl.searchParams.get("type") === "photo" ? "photo" : "video";
+  const query = String(requestUrl.searchParams.get("query") || "").trim().replace(/\s+/g, " ");
+  if (query.length < 2 || query.length > 60) {
+    sendJson(response, 400, { ok: false, error: "InvalidSearchQuery" });
+    return;
+  }
+  const cacheKey = `${type}:${query.toLocaleLowerCase("en-US")}`;
+  const cached = pexelsCache.get(cacheKey);
+  if (cached && Date.now() - cached.createdAt < PEXELS_CACHE_TTL_MS) {
+    sendJson(response, 200, { ok: true, cached: true, items: cached.items });
+    return;
+  }
+  const rate = consumePexelsSearch(session.user.sub);
+  if (!rate.allowed) {
+    response.setHeader("Retry-After", String(rate.retryAfterSeconds));
+    sendJson(response, 429, { ok: false, error: "PexelsRateLimit", retryAfterSeconds: rate.retryAfterSeconds });
+    return;
+  }
+  const endpoint = type === "photo" ? "https://api.pexels.com/v1/search" : "https://api.pexels.com/v1/videos/search";
+  const upstreamUrl = new URL(endpoint);
+  upstreamUrl.searchParams.set("query", query);
+  upstreamUrl.searchParams.set("orientation", "landscape");
+  upstreamUrl.searchParams.set("locale", "pt-BR");
+  upstreamUrl.searchParams.set("per_page", "8");
+  const upstream = await fetch(upstreamUrl, {
+    headers: { Authorization: config.pexelsApiKey },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!upstream.ok) {
+    sendJson(response, upstream.status === 429 ? 429 : 502, { ok: false, error: upstream.status === 429 ? "PexelsRateLimit" : "PexelsRequestFailed" });
+    return;
+  }
+  const items = normalizePexelsItems(type, await upstream.json());
+  pexelsCache.set(cacheKey, { createdAt: Date.now(), items });
+  if (pexelsCache.size > 100) pexelsCache.delete(pexelsCache.keys().next().value);
+  sendJson(response, 200, { ok: true, cached: false, items });
+}
+
+const ADMIN_ROLE_RANK = Object.freeze({ user: 0, support: 1, moderator: 2, administrator: 3, owner: 4 });
+
+function canManageAdminTarget(actor, target) {
+  return (ADMIN_ROLE_RANK[actor.role] ?? 0) > (ADMIN_ROLE_RANK[target.role] ?? 0);
+}
+
+async function handleAdminUsers(request, response, requestUrl) {
+  const session = await requireAdminSession(request, response, "users.read");
+  if (!session) return;
+  if (!adminStore.available) {
+    sendJson(response, 503, { ok: false, error: "AdministrationUnavailable" });
+    return;
+  }
+  if (commerceStore.available) await commerceStore.getAccount(session.user);
+  const query = String(requestUrl.searchParams.get("query") || "").slice(0, 80);
+  const offset = Math.max(0, Number.parseInt(requestUrl.searchParams.get("offset") || "0", 10) || 0);
+  const result = await adminStore.listUsers({ query, offset, limit: 50 });
+  sendJson(response, 200, {
+    ok: true,
+    role: session.user.role,
+    permissions: Object.fromEntries(["users.read", "users.revoke", "users.ban", "energy.adjust", "audit.read", "roles.manage"].map((permission) => [permission, hasAdminPermission(session.user.role, permission)])),
+    ...result,
+  });
+}
+
+async function handleAdminAudit(request, response) {
+  const session = await requireAdminSession(request, response, "audit.read");
+  if (!session) return;
+  if (!adminStore.available) {
+    sendJson(response, 503, { ok: false, error: "AdministrationUnavailable" });
+    return;
+  }
+  sendJson(response, 200, { ok: true, events: await adminStore.listAudit(100) });
+}
+
+async function handleAdminUserAction(request, response, targetSub) {
+  if (!isTrustedRequestOrigin(request)) {
+    sendJson(response, 403, { ok: false, error: "InvalidOrigin" });
+    return;
+  }
+  const session = await requireAdminSession(request, response, "users.read");
+  if (!session) return;
+  if (!adminStore.available) {
+    sendJson(response, 503, { ok: false, error: "AdministrationUnavailable" });
+    return;
+  }
+  const body = await readJsonBody(request, MAX_COMMERCE_BODY_BYTES);
+  const action = String(body.action || "");
+  const target = await adminStore.getUser(targetSub);
+  if (!target) {
+    sendJson(response, 404, { ok: false, error: "UserNotFound" });
+    return;
+  }
+
+  if (["ban", "unban", "revoke_sessions", "set_role"].includes(action) && !canManageAdminTarget(session.user, target)) {
+    sendJson(response, 403, { ok: false, error: "Forbidden" });
+    return;
+  }
+
+  let updated = target;
+  let result = null;
+  if (action === "revoke_sessions") {
+    if (!hasAdminPermission(session.user.role, "users.revoke")) {
+      sendJson(response, 403, { ok: false, error: "Forbidden" });
+      return;
+    }
+    updated = await adminStore.revokeSessions(targetSub);
+  } else if (action === "ban") {
+    if (!hasAdminPermission(session.user.role, "users.ban")) {
+      sendJson(response, 403, { ok: false, error: "Forbidden" });
+      return;
+    }
+    const durationHours = Math.min(87_600, Math.max(1, Number.parseInt(body.durationHours || "24", 10) || 24));
+    const reason = String(body.reason || "").trim();
+    if (reason.length < 3) {
+      sendJson(response, 400, { ok: false, error: "BanReasonRequired" });
+      return;
+    }
+    updated = await adminStore.setBan(targetSub, { until: new Date(Date.now() + durationHours * 60 * 60 * 1000), reason });
+  } else if (action === "unban") {
+    if (!hasAdminPermission(session.user.role, "users.ban")) {
+      sendJson(response, 403, { ok: false, error: "Forbidden" });
+      return;
+    }
+    updated = await adminStore.setBan(targetSub, { until: null, reason: "" });
+  } else if (action === "set_role") {
+    if (!hasAdminPermission(session.user.role, "roles.manage")) {
+      sendJson(response, 403, { ok: false, error: "Forbidden" });
+      return;
+    }
+    if (!ADMIN_ROLES.includes(body.role)) {
+      sendJson(response, 400, { ok: false, error: "InvalidAdminRole" });
+      return;
+    }
+    const role = normalizeAdminRole(body.role);
+    updated = await adminStore.setRole(targetSub, role);
+  } else if (action === "adjust_energy") {
+    if (!hasAdminPermission(session.user.role, "energy.adjust")) {
+      sendJson(response, 403, { ok: false, error: "Forbidden" });
+      return;
+    }
+    if ((ADMIN_ROLE_RANK[target.role] ?? 0) >= (ADMIN_ROLE_RANK[session.user.role] ?? 0) && target.sub !== session.user.sub) {
+      sendJson(response, 403, { ok: false, error: "Forbidden" });
+      return;
+    }
+    if (!commerceStore.available) {
+      sendJson(response, 503, { ok: false, error: "CommerceUnavailable" });
+      return;
+    }
+    const delta = Number.parseInt(body.delta, 10);
+    result = await commerceStore.adminAdjustEnergy({ sub: target.sub, email: target.email }, delta, session.user.sub);
+    if (!result.ok) {
+      sendJson(response, 409, result);
+      return;
+    }
+    updated = await adminStore.getUser(targetSub);
+  } else {
+    sendJson(response, 400, { ok: false, error: "UnknownAdminAction" });
+    return;
+  }
+
+  await adminStore.writeAudit(session.user, action, targetSub, {
+    role: action === "set_role" ? updated.role : undefined,
+    durationHours: action === "ban" ? Number.parseInt(body.durationHours || "24", 10) : undefined,
+    delta: action === "adjust_energy" ? Number.parseInt(body.delta, 10) : undefined,
+    reason: action === "ban" ? String(body.reason || "").slice(0, 300) : undefined,
+  });
+  sendJson(response, 200, { ok: true, user: updated, result });
+}
+
 function isTutorAudioConfigured() {
   return Boolean(tutorAudioStore.available && r2AudioStorage.available);
 }
@@ -1099,8 +1391,10 @@ async function route(request, response) {
       service: "neon-studios-system-academy",
       authConfigured: isAuthConfigured(),
       learningSyncConfigured: learningStore.available,
+      administrationConfigured: adminStore.available,
       commerceConfigured: Boolean(stripe && commerceStore.available && config.stripeWebhookSecret),
       audioStorageConfigured: isTutorAudioConfigured(),
+      pexelsConfigured: Boolean(config.pexelsApiKey),
       communityEnabled: config.communityEnabled,
     });
     return;
@@ -1171,6 +1465,27 @@ async function route(request, response) {
     return;
   }
 
+  if (request.method === "GET" && requestUrl.pathname === "/api/backgrounds/pexels/search") {
+    await handlePexelsSearch(request, response, requestUrl);
+    return;
+  }
+
+  if (request.method === "GET" && requestUrl.pathname === "/api/admin/users") {
+    await handleAdminUsers(request, response, requestUrl);
+    return;
+  }
+
+  if (request.method === "GET" && requestUrl.pathname === "/api/admin/audit") {
+    await handleAdminAudit(request, response);
+    return;
+  }
+
+  const adminActionMatch = requestUrl.pathname.match(/^\/api\/admin\/users\/([^/]+)\/actions$/);
+  if (request.method === "POST" && adminActionMatch) {
+    await handleAdminUserAction(request, response, decodeURIComponent(adminActionMatch[1]));
+    return;
+  }
+
   if (request.method === "GET" && requestUrl.pathname === "/api/tutor/audio/config") {
     await handleTutorAudioConfig(request, response);
     return;
@@ -1199,7 +1514,7 @@ async function route(request, response) {
   }
 
   if (request.method === "GET" && requestUrl.pathname === "/login") {
-    if (await getAuthSession(request)) {
+    if (await getValidatedAuthSession(request)) {
       redirect(response, "/");
       return;
     }
@@ -1254,7 +1569,8 @@ async function route(request, response) {
   }
 
   if (request.method === "GET" && !requestUrl.pathname.startsWith("/api/")) {
-    if (!await getAuthSession(request)) {
+    if (!getAuthSession(request)) {
+      response.setHeader("Set-Cookie", clearAuthCookie());
       redirect(response, "/login");
       return;
     }
@@ -1274,7 +1590,7 @@ async function route(request, response) {
 }
 
 const server = http.createServer((request, response) => {
-  applySecurityHeaders(response);
+  applySecurityHeaders(response, request);
   route(request, response).catch((error) => {
     console.error(error);
     const statusCode = Number.isInteger(error.statusCode) ? error.statusCode : 500;

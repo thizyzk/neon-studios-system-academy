@@ -8,6 +8,7 @@ export function createCommerceStore(databaseUrl) {
       async getStripeCustomerId() { return null; },
       async processStripeEvent() { return { processed: false, reason: "unavailable" }; },
       async consumeEnergy() { return { ok: false, error: "unavailable" }; },
+      async adminAdjustEnergy() { return { ok: false, error: "unavailable" }; },
       async close() {},
     };
   }
@@ -197,6 +198,43 @@ export function createCommerceStore(databaseUrl) {
         `, [user.sub, -amount, reason]);
         await client.query("COMMIT");
         return { ok: true, purchasedEnergy: Number(result.rows[0].purchased_energy) };
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async adminAdjustEnergy(targetUser, delta, actorSub) {
+      await ensureSchema();
+      if (!Number.isInteger(delta) || delta === 0 || Math.abs(delta) > 1_000_000) {
+        return { ok: false, error: "invalid_amount" };
+      }
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await ensureAccount(client, targetUser.sub, targetUser.email);
+        const balanceResult = await client.query(`
+          SELECT purchased_energy FROM academy_commerce_accounts
+          WHERE google_sub = $1 FOR UPDATE
+        `, [targetUser.sub]);
+        const current = Number(balanceResult.rows[0]?.purchased_energy || 0);
+        const next = current + delta;
+        if (next < 0) {
+          await client.query("ROLLBACK");
+          return { ok: false, error: "insufficient_energy", purchasedEnergy: current };
+        }
+        await client.query(`
+          UPDATE academy_commerce_accounts SET purchased_energy = $2, updated_at = NOW()
+          WHERE google_sub = $1
+        `, [targetUser.sub, next]);
+        await client.query(`
+          INSERT INTO academy_energy_ledger (google_sub, delta, source)
+          VALUES ($1, $2, $3)
+        `, [targetUser.sub, delta, `admin_adjustment:${String(actorSub).slice(0, 120)}`]);
+        await client.query("COMMIT");
+        return { ok: true, purchasedEnergy: next };
       } catch (error) {
         await client.query("ROLLBACK");
         throw error;

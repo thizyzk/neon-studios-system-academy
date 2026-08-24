@@ -12,11 +12,15 @@ test("signed sessions preserve trusted administration claims", () => {
     email: "admin@example.com",
     name: "Admin",
     isAdmin: true,
+    role: "owner",
+    sessionVersion: 7,
   }, secret, 3600, now);
 
   const verified = verifySignedSession(session.token, secret, now + 1000);
   assert.equal(verified.user.email, "admin@example.com");
   assert.equal(verified.user.isAdmin, true);
+  assert.equal(verified.user.role, "owner");
+  assert.equal(verified.user.sessionVersion, 7);
 });
 
 test("tampered and expired sessions are rejected", () => {

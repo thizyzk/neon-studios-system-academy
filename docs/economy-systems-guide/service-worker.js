@@ -1,8 +1,11 @@
-const CACHE_NAME = "neon-academy-v4";
+const CACHE_NAME = "neon-academy-v5";
 const APP_SHELL = [
   "/",
   "/styles.css",
   "/app.js",
+  "/asset-cache.js",
+  "/academy-themes.js",
+  "/roblox-ui-visualizer.js",
   "/academy-effects.js",
   "/academy-scene.js",
   "/academy-data.js",

@@ -20,6 +20,27 @@ npm start
 
 Sem `DATABASE_URL`, a loja permanece indisponivel e o progresso usa o navegador. Esse comportamento e intencional.
 
+## Administracao
+
+1. Defina os e-mails proprietarios em `ADMIN_EMAILS`, separados por virgula.
+2. Configure `DATABASE_URL`; ela armazena cargos, bans, versoes de sessao e auditoria.
+3. Entre novamente com uma conta de `ADMIN_EMAILS`. Ela recebe o cargo `owner` e nao pode ser removida do bootstrap pelo painel.
+4. Abra `/#admin` e crie a hierarquia: `support`, `moderator`, `administrator` e `owner`.
+
+Permissoes sao verificadas em cada endpoint. Esconder o item de navegacao e apenas uma camada de interface; o bloqueio real esta no servidor. Expulsar ou banir incrementa a versao da sessao e invalida cookies anteriores.
+
+## Theme Studio e Pexels
+
+O Theme Studio usa `PEXELS_API_KEY` somente no servidor. A rota de busca exige sessao, Plus ativo no PostgreSQL e aplica limite por usuario. Mantenha os creditos Pexels visiveis.
+
+Os presets Mythic, Legendary e Cute estao no catalogo visual, mas permanecem bloqueados ate existirem preco e entitlement proprios no Stripe. Nao libere um tema pago apenas por `localStorage`.
+
+## Luau Studio
+
+O compilador oficial esta hospedado em `/luau/` e roda WebAssembly no navegador. O bundle vem de `luau-lang/playground`; veja `docs/economy-systems-guide/THIRD_PARTY_NOTICES.md`.
+
+Luau standalone valida linguagem, tipos e bytecode. Ele nao executa servicos do runtime Roblox. `DataStoreService`, `Players` e equivalentes ainda devem ser testados no Roblox Studio ou em servidores Roblox.
+
 ## TikTok Reels
 
 Proxy seguro entre o Roblox e a TikTok Display API.

@@ -23,6 +23,8 @@ function normalizeUser(user) {
     picture: String(user.picture ?? ""),
     hostedDomain: String(user.hostedDomain ?? ""),
     isAdmin: user.isAdmin === true,
+    role: String(user.role ?? (user.isAdmin === true ? "administrator" : "user")),
+    sessionVersion: Number.isInteger(user.sessionVersion) ? Math.max(0, user.sessionVersion) : 0,
   };
 }
 

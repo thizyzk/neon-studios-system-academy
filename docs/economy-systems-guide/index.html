@@ -16,6 +16,8 @@
   <div class="scroll-progress" aria-hidden="true"><span></span></div>
   <canvas id="academy-scene" class="academy-scene-canvas" aria-hidden="true"></canvas>
   <canvas id="pointer-trail" class="pointer-trail-canvas" aria-hidden="true"></canvas>
+  <div id="theme-media-background" class="theme-media-background" aria-hidden="true" hidden></div>
+  <a id="theme-media-credit" class="theme-media-credit" target="_blank" rel="noopener noreferrer" hidden></a>
 
   <div class="ambient-scene" aria-hidden="true">
     <div class="swamp-glow"></div>
@@ -61,6 +63,12 @@
         </button>
         <button class="nav-item" type="button" data-route="store">
           <i data-lucide="gem"></i><span>Plus e Energia</span>
+        </button>
+        <button class="nav-item" type="button" data-route="themes">
+          <i data-lucide="palette"></i><span>Theme Studio</span>
+        </button>
+        <button class="nav-item" type="button" data-route="ui-visualizer">
+          <i data-lucide="panels-top-left"></i><span>Visualizador de UI</span>
         </button>
         <button class="nav-item" type="button" data-route="community">
           <i data-lucide="users-round"></i><span>Comunidade</span>
@@ -170,6 +178,9 @@
   </dialog>
 
   <script src="assets/lucide.min.js"></script>
+  <script src="asset-cache.js"></script>
+  <script src="academy-themes.js"></script>
+  <script src="roblox-ui-visualizer.js"></script>
   <script src="integration-systems.js"></script>
   <script src="learning-library.js"></script>
   <script src="academy-data.js"></script>

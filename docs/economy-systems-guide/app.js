@@ -2734,6 +2734,7 @@ local scenarios = {
   let deferredInstallPrompt = null;
   let labFeedback = "";
   let currentUser = null;
+  let adminState = { status: "idle", users: [], total: 0, permissions: {}, events: [], error: "", query: "" };
   let activeQuiz = null;
   let commerceAccount = { available: false, purchasedEnergy: 0, plusActive: false };
   let commerceCatalog = [];
@@ -4327,8 +4328,32 @@ local scenarios = {
     content.innerHTML = `<header class="page-header"><div><div class="eyebrow">${icon("settings")} Preferências</div><h1>Configurações da Academy</h1><p class="lead">Controle movimento, som e privacidade visual sem alterar seu progresso.</p></div></header><section class="settings-list">${settings.map(([key, title, description]) => `<label><span class="settings-icon">${icon(key === "sounds" ? "volume-2" : key === "scene3d" ? "box" : key === "spoilerMode" ? "eye-off" : "sparkles")}</span><span><strong>${title}</strong><small>${description}</small></span><input type="checkbox" role="switch" data-setting="${key}" ${progress.settings[key] ? "checked" : ""}></label>`).join("")}</section>`;
   }
 
+  function extensionContext() {
+    return {
+      plusActive: commerceAccount.plusActive === true,
+      icon,
+      escapeHtml,
+      refreshIcons,
+      showToast,
+      rerender: render,
+    };
+  }
+
+  function renderThemeStudio() {
+    content.innerHTML = window.NeonThemeStudio.render(extensionContext());
+  }
+
+  function renderUiVisualizer() {
+    content.innerHTML = window.NeonRobloxUI.render(extensionContext());
+  }
+
   function renderCompiler() {
-    content.innerHTML = `<header class="page-header"><div><div class="eyebrow">${icon("binary")} Ferramenta oficial</div><h1>Compilador e analisador Luau</h1><p class="lead">Edite, verifique tipos, execute e inspecione bytecode com o playground oficial da linguagem Luau.</p></div></header><section class="compiler-shell"><div class="compiler-toolbar"><span>${icon("shield-check")} Luau Playground oficial · WebAssembly no navegador</span><a class="button" href="https://play.luau.org/" target="_blank" rel="noopener noreferrer">Abrir em nova aba ${icon("external-link")}</a></div><iframe src="https://play.luau.org/?embed=true&theme=dark" title="Luau Playground oficial" loading="lazy" allow="clipboard-write"></iframe></section><p class="compiler-note">O ambiente Luau aberto não contém automaticamente APIs do Roblox Studio como <code>game</code>, <code>Players</code> ou <code>DataStoreService</code>. Use-o para linguagem, tipos, lint e bytecode.</p>`;
+    const services = window.NeonRobloxUI?.ROBLOX_SERVICES || [];
+    content.innerHTML = `<header class="page-header"><div><div class="eyebrow">${icon("binary")} Luau oficial no domínio Neon</div><h1>Luau Studio</h1><p class="lead">Crie múltiplos arquivos, use <code>--!strict</code>, receba diagnósticos, execute e inspecione bytecode em WebAssembly.</p></div><div class="header-actions"><button class="button primary" type="button" data-compiler-fullscreen>${icon("maximize")} Tela cheia</button></div></header>
+      <section class="compiler-shell" id="compiler-shell"><div class="compiler-toolbar"><span>${icon("shield-check")} Motor oficial luau-lang/playground · execução local no navegador</span><span>MIT · versão hospedada pela Academy</span></div><iframe src="/luau/index.html?embed=true&theme=dark" title="Luau Playground oficial hospedado pela Neon Academy" loading="lazy" allow="clipboard-read; clipboard-write"></iframe></section>
+      <section class="compiler-runtime-notice"><div>${icon("server-cog")}</div><div><strong>Linguagem Luau não é o runtime Roblox</strong><p>O compilador reconhece sintaxe, tipos, módulos e <code>--!strict</code>. Serviços como <code>DataStoreService</code> só executam de verdade dentro do Roblox Studio ou de um servidor Roblox.</p></div></section>
+      <section class="content-section"><div class="section-heading"><div><div class="eyebrow">Índice Roblox</div><h2>Serviços reconhecidos no projeto</h2></div><p>Use estes nomes para autocomplete conceitual e leve o código validado ao Studio.</p></div><div class="compiler-service-index">${services.map((service) => `<code>${escapeHtml(service)}</code>`).join("")}</div></section>
+      <p class="compiler-note">Código e arquivos permanecem no estado local do playground. A Academy não envia seus scripts ao backend para compilar.</p>`;
   }
 
   function renderCommunity() {
@@ -4378,25 +4403,87 @@ local scenarios = {
         };
       }
       updateProgressUI();
+      window.NeonThemeStudio?.enforceEntitlement(commerceAccount.plusActive);
       if (currentRoute().startsWith("store")) render();
       if (currentRoute() === "tutor") render();
+      if (currentRoute() === "themes") render();
     } catch (_error) {
       commerceAccount = { available: false, purchasedEnergy: 0, plusActive: false };
       tutorAudioConfig.available = false;
+      window.NeonThemeStudio?.enforceEntitlement(false);
     }
+  }
+
+  async function loadAdminState(force = false) {
+    if (!currentUser?.isAdmin || (adminState.status === "loading" && !force)) return;
+    adminState.status = "loading";
+    try {
+      const usersResponse = await fetch(`/api/admin/users?query=${encodeURIComponent(adminState.query)}`, { credentials: "same-origin", cache: "no-store" });
+      const usersPayload = await usersResponse.json();
+      if (!usersResponse.ok) throw new Error(usersPayload.error || "AdministrationUnavailable");
+      let events = [];
+      if (usersPayload.permissions?.["audit.read"]) {
+        const auditResponse = await fetch("/api/admin/audit", { credentials: "same-origin", cache: "no-store" });
+        if (auditResponse.ok) events = (await auditResponse.json()).events || [];
+      }
+      adminState = {
+        ...adminState,
+        status: "ready",
+        users: usersPayload.users || [],
+        total: Number(usersPayload.total) || 0,
+        permissions: usersPayload.permissions || {},
+        role: usersPayload.role || currentUser.role || "administrator",
+        events,
+        error: "",
+      };
+    } catch (error) {
+      adminState = { ...adminState, status: "error", error: error.message, users: [], events: [] };
+    }
+    if (currentRoute() === "admin") render();
+  }
+
+  function adminDate(value) {
+    if (!value) return "Nunca";
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? "Data inválida" : date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  }
+
+  function renderAdminUserRows() {
+    const rank = { user: 0, support: 1, moderator: 2, administrator: 3, owner: 4 };
+    return adminState.users.map((user) => {
+      const banned = user.bannedUntil && new Date(user.bannedUntil).getTime() > Date.now();
+      const manageable = (rank[adminState.role] || 0) > (rank[user.role] || 0);
+      const target = escapeHtml(user.sub);
+      return `<tr>
+        <td><strong>${escapeHtml(user.name || user.email)}</strong><small>${escapeHtml(user.email)}</small></td>
+        <td><span class="admin-role role-${escapeHtml(user.role)}">${escapeHtml(user.role)}</span></td>
+        <td><strong>${Number(user.purchasedEnergy || 0).toLocaleString("pt-BR")}</strong><small>${user.plusActive ? "Plus ativo" : "Plano comum"}</small></td>
+        <td><span class="admin-status ${banned ? "banned" : "active"}">${banned ? "Banido" : "Ativo"}</span><small>${banned ? `até ${adminDate(user.bannedUntil)}` : adminDate(user.lastLoginAt)}</small></td>
+        <td><details class="admin-user-actions"><summary class="icon-button" title="Ações do usuário" aria-label="Ações do usuário">${icon("ellipsis")}</summary><div>
+          ${adminState.permissions["users.revoke"] && manageable ? `<button class="button" type="button" data-admin-quick-action="revoke_sessions" data-admin-target="${target}">${icon("log-out")} Expulsar sessões</button>` : ""}
+          ${adminState.permissions["users.ban"] && manageable ? (banned ? `<button class="button" type="button" data-admin-quick-action="unban" data-admin-target="${target}">${icon("shield-check")} Remover ban</button>` : `<form data-admin-user-form="ban" data-admin-target="${target}"><label>Motivo<input name="reason" minlength="3" maxlength="300" required></label><label>Horas<input name="durationHours" type="number" min="1" max="87600" value="24" required></label><button class="button danger-button" type="submit">${icon("ban")} Banir</button></form>`) : ""}
+          ${adminState.permissions["energy.adjust"] ? `<form data-admin-user-form="adjust_energy" data-admin-target="${target}"><label>Ajuste de energia<input name="delta" type="number" min="-1000000" max="1000000" step="1" placeholder="50 ou -20" required></label><button class="button" type="submit">${icon("box")} Aplicar no ledger</button></form>` : ""}
+          ${adminState.permissions["roles.manage"] && manageable ? `<form data-admin-user-form="set_role" data-admin-target="${target}"><label>Cargo<select name="role">${["user","support","moderator","administrator","owner"].map((role) => `<option value="${role}" ${role === user.role ? "selected" : ""}>${role}</option>`).join("")}</select></label><button class="button" type="submit">${icon("shield-ellipsis")} Alterar cargo</button></form>` : ""}
+          ${manageable ? "" : "<p>Hierarquia protegida: esta conta não pode ser manipulada pelo seu cargo.</p>"}
+        </div></details></td>
+      </tr>`;
+    }).join("");
   }
 
   function renderAdmin() {
     if (!currentUser?.isAdmin) {
-      content.innerHTML = `<section class="access-denied">${icon("shield-x")}<h1>Acesso administrativo restrito</h1><p>Esta conta não aparece em <code>ADMIN_EMAILS</code>.</p><button class="button" type="button" data-route="overview">Voltar</button></section>`;
+      content.innerHTML = `<section class="access-denied">${icon("shield-x")}<h1>Acesso administrativo restrito</h1><p>Sua sessão não possui um cargo administrativo válido.</p><button class="button" type="button" data-route="overview">Voltar</button></section>`;
       return;
     }
+    if (adminState.status === "idle") queueMicrotask(() => loadAdminState());
     const completed = systems.filter((system) => progress.systems[system.id]).length;
+    const ready = adminState.status === "ready";
     content.innerHTML = `
-      <header class="page-header"><div><div class="eyebrow">${icon("shield-ellipsis")} Operação da Academy</div><h1>Administração</h1><p class="lead">Audite catálogo, persistência, publicação e os dados da sua própria conta.</p></div></header>
-      <section class="admin-grid"><article><span>Conteúdo</span><strong>${systems.length} sistemas</strong><p>${systems.reduce((total, system) => total + system.methods.length, 0)} métodos documentados</p></article><article><span>Conta administrativa</span><strong>${escapeHtml(currentUser.email)}</strong><p>Sessão assinada e protegida</p></article><article><span>Persistência</span><strong>${syncStatus === "synced" ? "PostgreSQL ativo" : "Armazenamento local"}</strong><p>${completed} aulas concluídas nesta conta</p></article></section>
-      <section class="content-section"><div class="section-heading"><div><div class="eyebrow">Portabilidade</div><h2>Backup do perfil</h2></div><p>O arquivo inclui progresso, favoritos, notas, laboratório e workspace.</p></div><div class="admin-actions"><button class="button primary" type="button" data-export-profile>${icon("download")} Exportar backup</button><button class="button" type="button" data-import-profile>${icon("upload")} Importar backup</button><button class="button" type="button" data-sync-now>${icon("cloud-upload")} Sincronizar agora</button></div></section>
-      <section class="content-section"><div class="section-heading"><div><div class="eyebrow">Publicação</div><h2>Checklist operacional</h2></div></div><div class="check-list">${["Login Google e logout testados no domínio público.", "reCAPTCHA valida hostname e ação login.", "Políticas de privacidade e termos usam dados reais de contato.", "DATABASE_URL possui retenção e backup adequados.", "Manifesto, service worker e modo offline foram revisados.", "Conteúdo alterado possui changelog e revisão mobile."].map((item) => `<label class="check-item"><input type="checkbox"><span>${item}</span></label>`).join("")}</div></section>`;
+      <header class="page-header"><div><div class="eyebrow">${icon("shield-ellipsis")} Operação privada</div><h1>Administração</h1><p class="lead">Usuários, sessões, cargos, energia e eventos auditáveis validados no servidor.</p></div><div class="header-actions"><span class="admin-role role-${escapeHtml(adminState.role || currentUser.role || "administrator")}">${escapeHtml(adminState.role || currentUser.role || "administrator")}</span><button class="button" type="button" data-admin-refresh>${icon("refresh-cw")} Atualizar</button></div></header>
+      <section class="admin-grid"><article><span>Usuários registrados</span><strong>${ready ? adminState.total : "..."}</strong><p>Contas conhecidas pelo login</p></article><article><span>Conta administrativa</span><strong>${escapeHtml(currentUser.email)}</strong><p>Sessão assinada e cargo verificado ao vivo</p></article><article><span>Persistência</span><strong>${syncStatus === "synced" || ready ? "PostgreSQL ativo" : "Verificando"}</strong><p>${completed} aulas concluídas nesta conta</p></article></section>
+      ${adminState.status === "error" ? `<section class="admin-error">${icon("database-zap")}<div><strong>Painel indisponível</strong><p>Configure <code>DATABASE_URL</code> para habilitar usuários, auditoria e ações administrativas.</p></div></section>` : `<section class="admin-console content-section"><div class="section-heading"><div><div class="eyebrow">Diretório</div><h2>Usuários do servidor</h2></div><form data-admin-search><input name="query" type="search" maxlength="80" value="${escapeHtml(adminState.query)}" placeholder="Buscar nome ou e-mail"><button class="icon-button" aria-label="Buscar" title="Buscar">${icon("search")}</button></form></div><div class="admin-table-wrap"><table class="admin-users-table"><thead><tr><th>Usuário</th><th>Cargo</th><th>Energia</th><th>Status</th><th>Ações</th></tr></thead><tbody>${ready ? renderAdminUserRows() : `<tr><td colspan="5"><div class="admin-loading">Carregando diretório seguro...</div></td></tr>`}</tbody></table></div></section>`}
+      ${adminState.permissions["audit.read"] ? `<section class="admin-audit content-section"><div class="section-heading"><div><div class="eyebrow">Auditoria</div><h2>Últimas operações</h2></div><p>Ações administrativas não aparecem para usuários comuns.</p></div><div class="admin-audit-list">${adminState.events.length ? adminState.events.map((event) => `<article><span>${icon(event.action === "ban" ? "ban" : event.action === "adjust_energy" ? "box" : "shield-check")}</span><div><strong>${escapeHtml(event.action)}</strong><small>${escapeHtml(event.actorEmail)} · alvo ${escapeHtml(event.targetSub || "sistema")}</small></div><time>${adminDate(event.createdAt)}</time></article>`).join("") : '<div class="empty-state">Nenhuma operação administrativa registrada.</div>'}</div></section>` : ""}
+      <section class="content-section"><div class="section-heading"><div><div class="eyebrow">Portabilidade pessoal</div><h2>Backup do seu perfil</h2></div></div><div class="admin-actions"><button class="button primary" type="button" data-export-profile>${icon("download")} Exportar backup</button><button class="button" type="button" data-import-profile>${icon("upload")} Importar backup</button><button class="button" type="button" data-sync-now>${icon("cloud-upload")} Sincronizar agora</button></div></section>`;
   }
 
   function render() {
@@ -4421,6 +4508,10 @@ local scenarios = {
       renderTutor();
     } else if (route === "compiler") {
       renderCompiler();
+    } else if (route === "themes") {
+      renderThemeStudio();
+    } else if (route === "ui-visualizer") {
+      renderUiVisualizer();
     } else if (route === "store" || route.startsWith("store/")) {
       renderStore(route === "store/success");
     } else if (route === "community") {
@@ -5071,12 +5162,64 @@ local scenarios = {
     refreshIcons();
   }
 
+  async function runAdminAction(targetSub, action, fields = {}) {
+    try {
+      const response = await fetch(`/api/admin/users/${encodeURIComponent(targetSub)}/actions`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, ...fields }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "AdminActionRejected");
+      showToast("Operação administrativa registrada na auditoria.");
+      await loadAdminState(true);
+    } catch (error) {
+      const messages = {
+        Forbidden: "Seu cargo não pode executar esta operação.",
+        BanReasonRequired: "Informe um motivo de banimento.",
+        insufficient_energy: "A conta não possui energia suficiente para esse débito.",
+        AdministrationUnavailable: "Configure DATABASE_URL para habilitar a administração.",
+      };
+      showToast(messages[error.message] || "A operação administrativa foi recusada.");
+    }
+  }
+
   document.addEventListener("click", (event) => {
     const routeTarget = event.target.closest("[data-route]");
     if (routeTarget) {
       routeTo(routeTarget.dataset.route);
       searchInput.value = "";
       updateSearch();
+      return;
+    }
+
+    if (event.target.closest("[data-apply-academy-theme], [data-theme-clear-media], [data-use-pexels]")) {
+      window.NeonThemeStudio.handleClick(event, extensionContext());
+      return;
+    }
+
+    if (event.target.closest("[data-ui-load-sample], [data-ui-export]")) {
+      window.NeonRobloxUI.handleClick(event, extensionContext());
+      return;
+    }
+
+    if (event.target.closest("[data-admin-refresh]")) {
+      loadAdminState(true);
+      return;
+    }
+
+    if (event.target.closest("[data-compiler-fullscreen]")) {
+      const shell = document.getElementById("compiler-shell");
+      if (!document.fullscreenElement) shell?.requestFullscreen?.().catch(() => showToast("Este navegador recusou a tela cheia."));
+      else document.exitFullscreen?.();
+      return;
+    }
+
+    const adminQuickAction = event.target.closest("[data-admin-quick-action]");
+    if (adminQuickAction) {
+      adminQuickAction.disabled = true;
+      runAdminAction(adminQuickAction.dataset.adminTarget, adminQuickAction.dataset.adminQuickAction);
       return;
     }
 
@@ -5399,6 +5542,16 @@ local scenarios = {
   });
 
   document.addEventListener("change", (event) => {
+    if (event.target.matches("[data-theme-setting], [data-theme-local-media]")) {
+      window.NeonThemeStudio.handleChange(event, extensionContext());
+      return;
+    }
+
+    if (event.target.matches("[data-ui-mode]")) {
+      window.NeonRobloxUI.handleChange(event, extensionContext());
+      return;
+    }
+
     const settingKey = event.target.dataset.setting;
     if (settingKey && Object.hasOwn(progress.settings, settingKey)) {
       progress.settings[settingKey] = event.target.checked;
@@ -5464,7 +5617,9 @@ local scenarios = {
   });
 
   document.addEventListener("input", (event) => {
-    if (event.target.matches("[data-work-notes]")) {
+    if (event.target.id === "ui-visualizer-code") {
+      window.NeonRobloxUI.handleInput(event, extensionContext());
+    } else if (event.target.matches("[data-work-notes]")) {
       workState.notes = event.target.value;
       saveWorkState(false);
     } else if (event.target.matches("[data-work-project-name]")) {
@@ -5503,6 +5658,25 @@ local scenarios = {
   });
 
   document.addEventListener("submit", (event) => {
+    if (event.target.matches("[data-pexels-search]")) {
+      window.NeonThemeStudio.handleSubmit(event, extensionContext());
+      return;
+    }
+    const adminSearch = event.target.closest("[data-admin-search]");
+    if (adminSearch) {
+      event.preventDefault();
+      adminState.query = String(new FormData(adminSearch).get("query") || "").trim();
+      loadAdminState(true);
+      return;
+    }
+    const adminForm = event.target.closest("[data-admin-user-form]");
+    if (adminForm) {
+      event.preventDefault();
+      const fields = Object.fromEntries(new FormData(adminForm));
+      adminForm.querySelector("button[type='submit']").disabled = true;
+      runAdminAction(adminForm.dataset.adminTarget, adminForm.dataset.adminUserForm, fields);
+      return;
+    }
     const tutorForm = event.target.closest("[data-tutor-form]");
     if (tutorForm) {
       event.preventDefault();
