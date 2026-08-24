@@ -5498,7 +5498,7 @@ local scenarios = {
       fetch("/api/commerce/checkout", {
         method: "POST",
         credentials: "same-origin",
-        signal: AbortSignal.timeout(20_000),
+        signal: AbortSignal.timeout(40_000),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           productId: buyTarget.dataset.buyProduct,
@@ -5511,7 +5511,6 @@ local scenarios = {
       }).catch((error) => {
         const messages = {
           StripePriceMismatch: "O preço no Stripe não corresponde ao catálogo da Academy.",
-          StripeTermsUrlMissing: "Cadastre a URL dos Termos de Uso nas configurações públicas do Stripe.",
           StripeResourceMissing: "O Price ID configurado não existe neste modo do Stripe.",
           StripeUnavailable: "O Stripe está temporariamente indisponível. Tente novamente em instantes.",
           CheckoutProviderRejected: "O Stripe recusou a criação do checkout. Verifique as configurações do produto.",

@@ -1173,7 +1173,6 @@ async function handleCommerceCheckout(request, response) {
       metadata,
       ...(product.type === "subscription" ? { subscription_data: { metadata } } : {}),
       ...(product.type === "energy" ? { payment_intent_data: { metadata } } : {}),
-      consent_collection: { terms_of_service: "required" },
       allow_promotion_codes: config.stripeAllowPromotionCodes,
       automatic_tax: { enabled: config.stripeAutomaticTax },
       success_url: `${config.publicBaseUrl}/?checkout=success&session_id={CHECKOUT_SESSION_ID}#store/success`,
