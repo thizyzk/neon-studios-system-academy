@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#08111f">
+  <title>Jarvis Local | Assistente por Voz</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="hero" aria-labelledby="title">
+      <div class="status-bar">
+        <span class="pulse" id="pulse" aria-hidden="true"></span>
+        <span id="status-label">Pronto para iniciar</span>
+      </div>
+
+      <div class="hero-grid">
+        <div class="identity">
+          <p class="eyebrow">Assistente local por voz</p>
+          <h1 id="title">Jarvis</h1>
+          <p class="lead">Converse, dite comandos, salve ideias e organize tarefas sem depender de API paga. A memória fica neste navegador.</p>
+        </div>
+
+        <div class="orb-wrap" aria-hidden="true">
+          <div class="orb">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="controls" aria-label="Controles principais">
+        <button class="primary" id="listen-button" type="button">
+          <span class="button-icon">MIC</span>
+          <span>Iniciar escuta</span>
+        </button>
+        <button id="stop-button" type="button">
+          <span class="button-icon">STOP</span>
+          <span>Parar</span>
+        </button>
+        <button id="speak-button" type="button">
+          <span class="button-icon">PLAY</span>
+          <span>Ler última resposta</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="workspace">
+      <aside class="panel command-panel">
+        <div class="panel-heading">
+          <p class="eyebrow">Comandos</p>
+          <h2>Fale assim</h2>
+        </div>
+        <div class="command-list" id="command-list"></div>
+      </aside>
+
+      <section class="chat-panel" aria-label="Conversa">
+        <div class="transcript-bar">
+          <div>
+            <p class="eyebrow">Entrada de voz</p>
+            <strong id="heard-text">Nada ouvido ainda.</strong>
+          </div>
+          <button class="ghost" id="clear-chat" type="button">Limpar</button>
+        </div>
+        <div class="chat-log" id="chat-log"></div>
+        <form class="text-command" id="text-form">
+          <input id="text-input" type="text" autocomplete="off" placeholder="Digite um comando se não quiser falar">
+          <button type="submit">Enviar</button>
+        </form>
+      </section>
+
+      <aside class="panel memory-panel">
+        <div class="panel-heading">
+          <p class="eyebrow">Memória local</p>
+          <h2>O que ele lembra</h2>
+        </div>
+        <div class="memory-block">
+          <h3>Notas</h3>
+          <ul id="notes-list"></ul>
+        </div>
+        <div class="memory-block">
+          <h3>Tarefas</h3>
+          <ul id="tasks-list"></ul>
+        </div>
+        <div class="voice-settings">
+          <label>
+            Voz
+            <select id="voice-select"></select>
+          </label>
+          <label>
+            Velocidade
+            <input id="rate-input" type="range" min="0.7" max="1.35" value="1" step="0.05">
+          </label>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,222 @@
+{
+  "nodes": [
+    {
+      "id": "central",
+      "type": "text",
+      "x": 0,
+      "y": 0,
+      "width": 420,
+      "height": 230,
+      "text": "# Cotton Fabric Tycoon + Jetstream\n\nUsar videos curtos estilo reels para deixar a fabrica viva, ensinar o jogador e celebrar progresso.\n\nLoop principal:\nplantar -> colher -> limpar -> fiar -> tecer -> vender -> melhorar -> desbloquear andar",
+      "color": "4"
+    },
+    {
+      "id": "concept",
+      "type": "text",
+      "x": -520,
+      "y": -260,
+      "width": 390,
+      "height": 250,
+      "text": "## Conceito do jogo\n\n- Tycoon Roblox de algodao e tecido.\n- O jogador transforma uma fazenda simples em uma fabrica eficiente.\n- O progresso aparece em andares, maquinas, skills e tipos de algodao.\n- A fantasia: minha producao fica mais rapida, bonita e valiosa.",
+      "color": "2"
+    },
+    {
+      "id": "jetstream-role",
+      "type": "text",
+      "x": 520,
+      "y": -260,
+      "width": 410,
+      "height": 270,
+      "text": "## Papel do Jetstream\n\nJetstream converte MP4/GIF em frames, envia como assets Roblox e gera um modulo Luau com os IDs.\n\nNo jogo, `JetstreamFramePlayer` toca esses frames em um `ImageLabel`.\n\nEle nao e streaming do TikTok. E playback de imagens dentro do Roblox.",
+      "color": "3"
+    },
+    {
+      "id": "player-journey",
+      "type": "text",
+      "x": -520,
+      "y": 80,
+      "width": 390,
+      "height": 330,
+      "text": "## Jornada do jogador\n\n1. Entrar no plot.\n2. Falar com Farm Helper.\n3. Plantar Basic Cotton.\n4. Colher Raw Cotton.\n5. Rodar Cotton Cleaner.\n6. Rodar Thread Spinner.\n7. Rodar Fabric Loom.\n8. Vender Cotton Fabric.\n9. Comprar upgrades/skills.\n10. Desbloquear novos andares.",
+      "color": "2"
+    },
+    {
+      "id": "game-systems",
+      "type": "text",
+      "x": -1020,
+      "y": 80,
+      "width": 400,
+      "height": 330,
+      "text": "## Sistemas atuais\n\nAlgodoes:\n- Basic Cotton\n- Silky Cotton\n- Golden Cotton\n\nItens:\n- RawCotton\n- CleanCotton\n- CottonThread\n- CottonFabric\n\nMaquinas:\n- Cotton Cleaner\n- Thread Spinner\n- Fabric Loom\n\nNPCs:\n- Farm Helper\n- Factory Mentor",
+      "color": "1"
+    },
+    {
+      "id": "where-used",
+      "type": "text",
+      "x": 520,
+      "y": 80,
+      "width": 430,
+      "height": 340,
+      "text": "## Onde usar Jetstream\n\nHUD de Reels:\n- Botao `Video Reels`.\n- Conteudo vertical para teste e descoberta.\n\nTela 3D na fabrica:\n- `SurfaceGui` com videos em loop.\n- Mostra algodao, maquinas, tecido e propaganda interna.\n\nNPCs:\n- Farm Helper mostra plantio.\n- Factory Mentor mostra maquinas.\n\nUnlocks:\n- Video curto ao liberar andar ou etapa nova.",
+      "color": "3"
+    },
+    {
+      "id": "pipeline",
+      "type": "text",
+      "x": 1040,
+      "y": 80,
+      "width": 460,
+      "height": 350,
+      "text": "## Pipeline pratico\n\n1. Criar MP4 vertical 9:16.\n2. Colocar em `assets/jetstream-input/`.\n3. Configurar Open Cloud uma vez.\n4. Rodar conversao/importacao.\n5. Conferir modulo em `JetstreamVideos`.\n6. Conferir catalogo em `JetstreamReelsCatalog`.\n7. Testar no Roblox Studio.\n\nComando:\n```powershell\n.\\scripts\\jetstream-convert-and-import.ps1 -Name \"FarmIntro01\" -Input \".\\assets\\jetstream-input\\farm-intro-01.mp4\" -Fps 12 -Big $true\n```",
+      "color": "5"
+    },
+    {
+      "id": "content-pillars",
+      "type": "text",
+      "x": -520,
+      "y": 520,
+      "width": 430,
+      "height": 300,
+      "text": "## Pilares de conteudo\n\nTutorial rapido:\n- Como plantar, colher, vender e usar maquinas.\n\nFabrica viva:\n- Algodao entrando, fio girando, tecido saindo.\n\nProgresso:\n- Novo andar, algodao raro, maquina melhorada.\n\nEconomia:\n- Fabric vale mais, storage cheio, upgrade do Loom.\n\nSocial:\n- Convide amigos, mostre sua fabrica, eventos.",
+      "color": "6"
+    },
+    {
+      "id": "mvp-videos",
+      "type": "text",
+      "x": 0,
+      "y": 520,
+      "width": 420,
+      "height": 300,
+      "text": "## Primeiro pacote MVP\n\n`FarmIntro01`\nPlantio e colheita de algodao basico.\n\n`CleanerDemo01`\nRaw Cotton entrando no Cotton Cleaner.\n\n`SpinnerDemo01`\nClean Cotton virando Cotton Thread.\n\n`LoomDemo01`\nCotton Thread virando Cotton Fabric.\n\n`FactoryProgress01`\nFabrica subindo de andar.",
+      "color": "6"
+    },
+    {
+      "id": "technical-rules",
+      "type": "text",
+      "x": 520,
+      "y": 520,
+      "width": 420,
+      "height": 280,
+      "text": "## Regras tecnicas\n\n- Videos de 5 a 10 segundos.\n- 10 a 12 FPS.\n- 360p a 540p de largura.\n- Loop para telas ambientais.\n- Sem texto pequeno dentro do video.\n- Visual claro mesmo em painel compacto.\n- Usar videos criados, licenciados ou autorizados.",
+      "color": "5"
+    },
+    {
+      "id": "backlog",
+      "type": "text",
+      "x": 1040,
+      "y": 520,
+      "width": 420,
+      "height": 330,
+      "text": "## Backlog priorizado\n\nP0:\n- Importar `FarmIntro01`.\n- Preencher `JetstreamReelsCatalog`.\n\nP1:\n- Criar tela 3D com `SurfaceGui`.\n- Conectar NPCs a reels especificos.\n\nP2:\n- Criar reels por maquina.\n- Criar reels de unlock dos andares.\n\nP3:\n- Filtros por tutorial, evento, maquina e social.",
+      "color": "1"
+    },
+    {
+      "id": "files",
+      "type": "text",
+      "x": 1040,
+      "y": -260,
+      "width": 460,
+      "height": 260,
+      "text": "## Arquivos importantes\n\n- `docs/JETSTREAM_REELS.md`\n- `scripts/jetstream-configure.ps1`\n- `scripts/jetstream-convert-and-import.ps1`\n- `src/ReplicatedStorage/Shared/Modules/JetstreamFramePlayer.luau`\n- `src/ReplicatedStorage/Shared/Modules/JetstreamReelsCatalog.luau`\n- `src/ReplicatedStorage/Shared/Modules/JetstreamVideos/`\n- `src/StarterPlayerScripts/Controllers/JetstreamReelsController.luau`",
+      "color": "1"
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-concept-central",
+      "fromNode": "concept",
+      "fromSide": "right",
+      "toNode": "central",
+      "toSide": "left",
+      "label": "base"
+    },
+    {
+      "id": "edge-jetstream-central",
+      "fromNode": "jetstream-role",
+      "fromSide": "left",
+      "toNode": "central",
+      "toSide": "right",
+      "label": "camada visual"
+    },
+    {
+      "id": "edge-systems-journey",
+      "fromNode": "game-systems",
+      "fromSide": "right",
+      "toNode": "player-journey",
+      "toSide": "left",
+      "label": "suporta"
+    },
+    {
+      "id": "edge-journey-central",
+      "fromNode": "player-journey",
+      "fromSide": "right",
+      "toNode": "central",
+      "toSide": "left",
+      "label": "loop"
+    },
+    {
+      "id": "edge-central-where",
+      "fromNode": "central",
+      "fromSide": "right",
+      "toNode": "where-used",
+      "toSide": "left",
+      "label": "aparece em"
+    },
+    {
+      "id": "edge-where-pipeline",
+      "fromNode": "where-used",
+      "fromSide": "right",
+      "toNode": "pipeline",
+      "toSide": "left",
+      "label": "produzir"
+    },
+    {
+      "id": "edge-files-pipeline",
+      "fromNode": "files",
+      "fromSide": "bottom",
+      "toNode": "pipeline",
+      "toSide": "top",
+      "label": "referencia"
+    },
+    {
+      "id": "edge-central-pillars",
+      "fromNode": "central",
+      "fromSide": "bottom",
+      "toNode": "content-pillars",
+      "toSide": "top",
+      "label": "conteudo"
+    },
+    {
+      "id": "edge-pillars-mvp",
+      "fromNode": "content-pillars",
+      "fromSide": "right",
+      "toNode": "mvp-videos",
+      "toSide": "left",
+      "label": "primeiros videos"
+    },
+    {
+      "id": "edge-mvp-rules",
+      "fromNode": "mvp-videos",
+      "fromSide": "right",
+      "toNode": "technical-rules",
+      "toSide": "left",
+      "label": "formato"
+    },
+    {
+      "id": "edge-rules-backlog",
+      "fromNode": "technical-rules",
+      "fromSide": "right",
+      "toNode": "backlog",
+      "toSide": "left",
+      "label": "execucao"
+    },
+    {
+      "id": "edge-pipeline-backlog",
+      "fromNode": "pipeline",
+      "fromSide": "bottom",
+      "toNode": "backlog",
+      "toSide": "top",
+      "label": "proximos passos"
+    }
+  ]
+}

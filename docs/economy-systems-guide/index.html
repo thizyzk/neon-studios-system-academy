@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#146b68">
+  <meta name="description" content="Academia prática de sistemas Roblox, Luau, arquitetura, IA, dados e produção de jogos.">
+  <title>Neon Studios System Academy</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#content">Ir para o conteúdo</a>
+  <div class="scroll-progress" aria-hidden="true"><span></span></div>
+
+  <div class="ambient-scene" aria-hidden="true">
+    <div class="swamp-glow"></div>
+    <div class="ambient-grid"></div>
+    <div class="ambient-plane ambient-plane-one"></div>
+    <div class="ambient-plane ambient-plane-two"></div>
+  </div>
+
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar" aria-label="Navegação principal">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"><i data-lucide="graduation-cap"></i></span>
+        <div>
+          <strong>Neon Studios</strong>
+          <span>System Academy</span>
+        </div>
+        <button class="icon-button sidebar-close" id="sidebar-close" type="button" aria-label="Fechar navegação" title="Fechar navegação">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+
+      <nav class="primary-nav">
+        <button class="nav-item active" type="button" data-route="overview">
+          <i data-lucide="layout-dashboard"></i><span>Visão geral</span>
+        </button>
+        <button class="nav-item" type="button" data-route="roadmap">
+          <i data-lucide="route"></i><span>Ordem de construção</span>
+        </button>
+        <button class="nav-item" type="button" data-route="methods">
+          <i data-lucide="braces"></i><span>Métodos Roblox/Luau</span>
+        </button>
+        <button class="nav-item" type="button" data-route="workspace">
+          <i data-lucide="panels-top-left"></i><span>Local de Trabalho</span>
+        </button>
+        <button class="nav-item" type="button" data-route="cframes">
+          <i data-lucide="box"></i><span>CFrames</span>
+        </button>
+        <button class="nav-item" type="button" data-route="humanoid">
+          <i data-lucide="person-standing"></i><span>Humanoid</span>
+        </button>
+        <button class="nav-item" type="button" data-route="ai-programming">
+          <i data-lucide="brain-circuit"></i><span>IA, NPCs e Inimigos</span>
+        </button>
+        <button class="nav-item" type="button" data-route="storage">
+          <i data-lucide="database"></i><span>Storage</span>
+        </button>
+        <button class="nav-item" type="button" data-route="solo-dev">
+          <i data-lucide="flame-kindling"></i><span>O que ninguém fala</span>
+        </button>
+      </nav>
+
+      <div class="nav-section-label">Sistemas</div>
+      <nav class="system-nav" id="system-nav" aria-label="Sistemas de economia e progressão"></nav>
+
+      <div class="sidebar-progress">
+        <div class="progress-copy">
+          <span>Progresso de estudo</span>
+          <strong id="sidebar-progress-label">0%</strong>
+        </div>
+        <div class="progress-track" aria-hidden="true">
+          <span id="sidebar-progress-bar"></span>
+        </div>
+      </div>
+    </aside>
+
+    <div class="sidebar-scrim" id="sidebar-scrim" hidden></div>
+
+    <div class="workspace">
+      <header class="topbar">
+        <button class="icon-button menu-button" id="menu-button" type="button" aria-label="Abrir navegação" title="Abrir navegação">
+          <i data-lucide="menu"></i>
+        </button>
+
+        <div class="search-wrap">
+          <i data-lucide="search" aria-hidden="true"></i>
+          <input id="search-input" type="search" placeholder="Buscar aula, método, sistema ou snippet" autocomplete="off" aria-label="Buscar no guia">
+          <button class="icon-button search-clear" id="search-clear" type="button" aria-label="Limpar busca" title="Limpar busca" hidden>
+            <i data-lucide="x"></i>
+          </button>
+          <div class="search-results" id="search-results" hidden></div>
+        </div>
+
+        <div class="auth-user" id="auth-user" hidden>
+          <img id="auth-user-avatar" alt="" referrerpolicy="no-referrer" hidden>
+          <span class="auth-user-avatar-fallback" id="auth-user-avatar-fallback" aria-hidden="true"><i data-lucide="user"></i></span>
+          <span class="auth-user-copy"><strong id="auth-user-name"></strong><small id="auth-user-email"></small></span>
+          <button class="icon-button" id="logout-button" type="button" aria-label="Sair da conta" title="Sair da conta">
+            <i data-lucide="log-out"></i>
+          </button>
+        </div>
+
+        <button class="icon-button" id="print-button" type="button" aria-label="Imprimir guia" title="Imprimir guia">
+          <i data-lucide="printer"></i>
+        </button>
+        <button class="icon-button" id="theme-button" type="button" aria-label="Alternar tema" title="Alternar tema">
+          <i data-lucide="moon"></i>
+        </button>
+      </header>
+
+      <main id="content" tabindex="-1"></main>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="assets/lucide.min.js"></script>
+  <script src="integration-systems.js"></script>
+  <script src="learning-library.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

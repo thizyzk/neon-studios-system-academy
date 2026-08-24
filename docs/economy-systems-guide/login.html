@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#146b68">
+  <meta name="description" content="Acesso seguro à Neon Studios System Academy.">
+  <title>Entrar | Neon Studios System Academy</title>
+  <link rel="stylesheet" href="auth.css">
+</head>
+<body>
+  <div class="auth-ambient" aria-hidden="true">
+    <div class="auth-grid"></div>
+    <div class="auth-glow"></div>
+  </div>
+
+  <main class="auth-shell">
+    <header class="auth-brand">
+      <span><i data-lucide="graduation-cap"></i></span>
+      <div><strong>Neon Studios</strong><small>System Academy</small></div>
+    </header>
+
+    <section class="auth-tool" aria-labelledby="login-title">
+      <div class="auth-heading">
+        <div class="auth-icon"><i data-lucide="shield-check"></i></div>
+        <div>
+          <span class="eyebrow">Neon Studios Access</span>
+          <h1 id="login-title">Entrar na Academy</h1>
+          <p>A proteção automática valida o acesso antes de abrir sua trilha com a conta Google.</p>
+        </div>
+      </div>
+
+      <div class="auth-steps">
+        <section class="auth-step" id="captcha-step">
+          <header><span>01</span><div><strong>Verificação humana</strong><small>Google reCAPTCHA</small></div></header>
+          <div class="captcha-slot" id="captcha-slot" aria-live="polite">
+            <div class="auth-loader" aria-label="Carregando verificação"></div>
+          </div>
+        </section>
+
+        <section class="auth-step locked" id="google-step">
+          <header><span>02</span><div><strong>Conta Google</strong><small id="account-policy">Conta verificada</small></div></header>
+          <div class="google-slot" id="google-button"><span>Conclua o CAPTCHA primeiro</span></div>
+        </section>
+      </div>
+
+      <div class="auth-status" id="auth-status" role="status" aria-live="polite">Preparando login seguro...</div>
+
+      <aside class="config-warning" id="config-warning" hidden>
+        <i data-lucide="settings-2"></i>
+        <div><strong>Configuração pendente</strong><p id="config-message"></p></div>
+      </aside>
+
+      <footer>
+        <i data-lucide="lock-keyhole"></i>
+        <span>A sessão usa cookie seguro. O site não recebe nem armazena sua senha Google.</span>
+      </footer>
+      <nav class="auth-legal" aria-label="Documentos legais"><a href="/privacy">Privacidade</a><a href="/terms">Termos de uso</a></nav>
+    </section>
+  </main>
+
+  <script src="assets/lucide.min.js"></script>
+  <script src="auth.js"></script>
+</body>
+</html>

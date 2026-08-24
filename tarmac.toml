@@ -1,0 +1,9 @@
+name = "cotton-fabric-tycoon-assets"
+asset-cache-path = "assets/.asset-cache"
+asset-list-path = "assets/asset-list.txt"
+
+[[inputs]]
+glob = "assets/ui/*.png"
+codegen = true
+codegen-path = "src/ReplicatedStorage/Shared/Modules/GeneratedAssets.luau"
+codegen-base-path = "assets"

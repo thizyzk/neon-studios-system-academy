@@ -1,0 +1,40 @@
+# TikTok Reels Server
+
+Proxy seguro entre o Roblox e a TikTok Display API.
+
+## Como usar
+
+1. Crie um app no TikTok Developer Portal.
+2. Adicione Login Kit e Display API ao app.
+3. Peça/aprove os escopos `user.info.basic` e `video.list`.
+4. Copie `server/.env.example` para `server/.env` e preencha as credenciais.
+5. Rode:
+
+```powershell
+cd server
+npm start
+```
+
+6. Abra `http://localhost:3000/auth/tiktok` no navegador e autorize a conta TikTok que fornecerá os reels.
+7. Publique este servidor em HTTPS antes de usar em produção e configure `ServerUrl` em `src/ServerScriptService/Config/TikTokReelsConfig.luau`.
+
+O servidor salva tokens em `server/.data/tiktok-session.json`, que é ignorado pelo Git.
+
+## Baixar vídeos de natureza/ambientação
+
+Use a Pexels API para baixar vídeos royalty-free em vez de baixar vídeos de terceiros do TikTok.
+
+1. Crie uma chave em https://www.pexels.com/api/
+2. Adicione ao `server/.env`:
+
+```powershell
+PEXELS_API_KEY=sua_chave
+```
+
+3. Rode:
+
+```powershell
+npm run download:ambient-videos -- --query "nature ambience forest river" --count 5
+```
+
+Os vídeos serão salvos em `assets/ambient-videos/`, junto com `manifest.json`.

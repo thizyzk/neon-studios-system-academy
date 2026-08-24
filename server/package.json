@@ -1,0 +1,17 @@
+{
+  "name": "neon-studios-system-academy-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "download:ambient-videos": "node scripts/downloadAmbientVideos.js",
+    "check": "node --check src/index.js && node --check src/config.js && node --check src/signedSession.js && node --check src/tiktokClient.js && node --check src/tokenStore.js && node --check scripts/downloadAmbientVideos.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "google-auth-library": "^10.3.0"
+  }
+}

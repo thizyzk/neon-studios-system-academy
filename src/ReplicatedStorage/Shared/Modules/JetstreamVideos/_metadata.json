@@ -1,0 +1,32 @@
+{
+    "TikTokTest01":  {
+                         "Id":  "TikTokTest01",
+                         "DisplayName":  "TikTokTest01",
+                         "ModuleName":  "TikTokTest01",
+                         "Fps":  6,
+                         "Looped":  true,
+                         "Enabled":  false,
+                         "SourcePath":  "C:\\Users\\Thiago-PC\\Desktop\\DesenvolvimentoDeJogo\\Cotton Fabric Tycoon\\assets\\TikTokVideos\\1-TikTok video #76720243834471908157672024383447190815.mp4",
+                         "ImportedAt":  "2026-08-14T18:33:15.2417373-03:00",
+                         "AudioId":  "rbxassetid://114547334185500",
+                         "AudioName":  "maybe for you... this a tomorrow",
+                         "AudioSourcePath":  "C:\\Users\\Thiago-PC\\Desktop\\DesenvolvimentoDeJogo\\Cotton Fabric Tycoon\\assets\\JetstreamAudio\\TikTokTest01.mp3",
+                         "AudioImportedAt":  "2026-08-14T18:56:57.2030112-03:00"
+                     },
+    "TikTokTest01HiFps":  {
+                              "Id":  "TikTokTest01HiFps",
+                              "DisplayName":  "TikTokTest01",
+                              "ModuleName":  "TikTokTest01HiFps",
+                              "Fps":  29.99,
+                              "Looped":  true,
+                              "SourcePath":  "C:\\Users\\Thiago-PC\\Desktop\\DesenvolvimentoDeJogo\\Cotton Fabric Tycoon\\assets\\TikTokVideos\\1-TikTok video #76720243834471908157672024383447190815.mp4",
+                              "ImportedAt":  "2026-08-14T22:16:42.2626432-03:00",
+                              "FastImageUpload":  true,
+                              "LowLight":  false,
+                              "FrameSourceDir":  "C:\\Users\\Thiago-PC\\.jetstream\\projects\\TikTokTest01HiFps-fast\\20260814_221027",
+                              "AudioId":  "rbxassetid://114547334185500",
+                              "AudioName":  "maybe for you... this a tomorrow",
+                              "AudioSourcePath":  "C:\\Users\\Thiago-PC\\Desktop\\DesenvolvimentoDeJogo\\Cotton Fabric Tycoon\\assets\\JetstreamAudio\\TikTokTest01.mp3",
+                              "AudioImportedAt":  "2026-08-14T18:56:57.2030112-03:00"
+                          }
+}
