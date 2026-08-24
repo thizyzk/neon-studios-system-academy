@@ -45,6 +45,7 @@ export function readConfig() {
 
   return {
     port: Number.parseInt(process.env.PORT ?? "3000", 10),
+    deploymentRevision: (process.env.RENDER_GIT_COMMIT?.trim() || "local").slice(0, 12),
     publicBaseUrl,
     siteRoot: process.env.SITE_ROOT ?? path.resolve(process.cwd(), "..", "docs", "economy-systems-guide"),
     sourceRoot: process.env.SOURCE_ROOT ?? path.resolve(process.cwd(), "..", "src"),

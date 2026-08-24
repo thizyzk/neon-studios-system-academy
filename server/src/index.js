@@ -1491,6 +1491,7 @@ async function route(request, response) {
     sendJson(response, 200, {
       ok: true,
       service: "neon-studios-system-academy",
+      revision: config.deploymentRevision,
       curriculumSystems: 170,
       launchReady: buildReadinessReport(config).launchReady,
       authConfigured: isAuthConfigured(),
