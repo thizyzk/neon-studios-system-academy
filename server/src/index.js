@@ -1865,9 +1865,8 @@ async function route(request, response) {
     return;
   }
 
-  if (request.method === "GET" && ["/privacy", "/terms"].includes(requestUrl.pathname)) {
-    const legalFile = requestUrl.pathname === "/privacy" ? "/privacy.html" : "/terms.html";
-    if (!await sendSiteFile(response, legalFile)) {
+  if (request.method === "GET" && ["/privacy", "/terms", "/support"].includes(requestUrl.pathname)) {
+    if (!await sendSiteFile(response, `${requestUrl.pathname}.html`)) {
       sendJson(response, 404, { ok: false, error: "NotFound" });
     }
     return;

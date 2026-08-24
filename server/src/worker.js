@@ -87,7 +87,7 @@ function withSecurityHeaders(response, requestUrl, assetPath) {
   if (requestUrl.protocol === "https:") {
     headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   }
-  if (assetPath.endsWith(".html") || ["/", "/login", "/privacy", "/terms"].includes(assetPath)) {
+  if (assetPath.endsWith(".html") || ["/", "/login", "/privacy", "/terms", "/support"].includes(assetPath)) {
     headers.set("Cache-Control", "no-store");
   }
   return new Response(response.body, {
@@ -127,7 +127,7 @@ export default {
       return serveAsset(request, env, "/login.html");
     }
 
-    if (pathname === "/privacy" || pathname === "/terms") {
+    if (["/privacy", "/terms", "/support"].includes(pathname)) {
       return serveAsset(request, env, `${pathname}.html`);
     }
 
